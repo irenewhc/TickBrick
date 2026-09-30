@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2026 北海道行程智慧排程器</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h1 { text-align: center; color: #2c3e50; margin-bottom: 5px; }
+        p.subtitle { text-align: center; color: #7f8c8d; margin-top: 0; margin-bottom: 25px; }
+        .toolbar { display: flex; justify-content: space-between; margin-bottom: 15px; }
+        button { background: #2c3e50; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
+        button:hover { background: #34495e; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th, td { border: 1px solid #e0e0e0; padding: 8px 10px; text-align: center; height: 25px; }
+        th { background-color: #2c3e50; color: white; font-weight: 600; }
+        tr:nth-child(even) { background-color: #fafafa; }
+        input, select { width: 90%; padding: 5px; border: 1px solid #ccc; border-radius: 4px; text-align: center; font-size: 14px; }
+        input[type="text"] { text-align: left; padding-left: 8px; }
+        
+        /* 類別顏色 */
+        .cat-transport { background-color: #E3F2FD !important; }
+        .cat-meal { background-color: #FFF3E0 !important; }
+        .cat-attraction { background-color: #E8F5E9 !important; }
+        .cat-shopping { background-color: #FFFFFF !important; }
+
+        /* 鎖定按鈕樣式 */
+        .lock-btn { background: #ecf0f1; color: #7f8c8d; border: 1px solid #bdc3c7; padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-left: 4px; }
+        .lock-btn.locked { background: #e74c3c; color: white; border-color: #c0392b; }
+
+        /* 燈箱 Modal 樣式 */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-box { background: white; padding: 30px; border-radius: 12px; width: 440px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); text-align: center; }
+        .modal-box h3 { margin-top: 0; color: #2c3e50; }
+        .modal-buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+        .modal-buttons button { padding: 12px; font-size: 15px; background: #3498db; }
+        .modal-buttons button:hover { background: #2980b9; }
+
+        /* 提示通知 Toast 樣式 */
+        #toast { position: fixed; bottom: 30px; right: 30px; background: #2ecc71; color: white; padding: 12px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-weight: bold; display: none; z-index: 1100; transition: opacity 0.3s; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>2026 北海道行程智慧排程器</h1>
+    <p class="subtitle">燈箱互動選擇 ＋ 雙向智慧無縫串聯 ＋ 日期完整顯示</p>
+    
+    <div class="toolbar">
+        <div>
+            <button onclick="addRow()">＋ 新增行程列</button>
+            <button onclick="saveData()" style="background: #27ae60; margin-left: 10px;">💾 儲存變更</button>
+        </div>
+        <button onclick="exportCSV()" style="background: #2980b9;">📥 匯出 CSV 表格</button>
+    </div>
+
+    <table id="itineraryTable">
+        <thead>
+            <tr>
+                <th style="width: 12%;">日期</th>
+                <th style="width: 15%;">開始時間</th>
+                <th style="width: 15%;">結束時間</th>
+                <th style="width: 15%;">總分鐘數</th>
+                <th style="width: 15%;">類別</th>
+                <th style="width: 28%;">事項內容</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            <!-- 動態生成 -->
+        </tbody>
+    </table>
+</div>
+
+<!-- 自訂燈箱 Modal -->
+<div id="customModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 id="modalTitle">請選擇推算方式</h3>
+        <p id="modalDesc" style="color: #666; font-size: 14px;">您剛剛只修改了一個欄位，請選擇要固定哪一個欄位來進行推算：</p>
+        <div class="modal-buttons" id="modalButtonsContainer">
+            <!-- 動態按鈕 -->
+        </div>
+    </div>
+</div>
+
+<!-- 提示通知 Toast -->
+<div id="toast">提示訊息</div>
+
+<script>
+let itineraryData = [
+    { date: "10/29 (四)", start: "06:30", end: "07:30", duration: 60, lock: "none", baseline: {start: "06:30", end: "07:30", duration: 60}, category: "交通", content: "➔ 桃園機場" },
+    { date: "10/29 (四)", start: "07:30", end: "09:30", duration: 120, lock: "none", baseline: {start: "07:30", end: "09:30", duration: 120}, category: "", content: "辦理登機通關" },
+    { date: "10/29 (四)", start: "09:30", end: "13:05", duration: 215, lock: "none", baseline: {start: "09:30", end: "13:05", duration: 215}, category: "", content: "Flight to SAPPORO (長榮 BR 116)" },
+    { date: "10/29 (四)", start: "13:05", end: "14:30", duration: 85, lock: "none", baseline: {start: "13:05", end: "14:30", duration: 85}, category: "", content: "抵達新千歲機場，辦理入境通關與提取行李" },
+    { date: "10/29 (四)", start: "14:30", end: "15:30", duration: 60, lock: "none", baseline: {start: "14:30", end: "15:30", duration: 60}, category: "交通", content: "機場 ➔ 旅館（HELIO HOSTEL）" },
+    { date: "10/29 (四)", start: "15:30", end: "16:00", duration: 30, lock: "none", baseline: {start: "15:30", end: "16:00", duration: 30}, category: "", content: "旅館辦理 Check-in" },
+    { date: "10/29 (四)", start: "16:00", end: "18:00", duration: 120, lock: "none", baseline: {start: "16:00", end: "18:00", duration: 120}, category: "景點", content: "北海道廳紅磚廳舍 ＆ 札幌市資料館" },
+    { date: "10/29 (四)", start: "18:00", end: "19:00", duration: 60, lock: "none", baseline: {start: "18:00", end: "19:00", duration: 60}, category: "用餐", content: "大通公園周邊湯咖哩" },
+    { date: "10/29 (四)", start: "19:00", end: "21:00", duration: 120, lock: "none", baseline: {start: "19:00", end: "21:00", duration: 120}, category: "逛街", content: "東急百貨店(va)、BIC CAMERA" }
+];
+
+if (localStorage.getItem('hokkaido_itinerary_v11')) {
+    itineraryData = JSON.parse(localStorage.getItem('hokkaido_itinerary_v11'));
+    itineraryData.forEach(row => {
+        if (!row.baseline) {
+            row.baseline = { start: row.start, end: row.end, duration: row.duration };
+        }
+    });
+}
+
+function showToast(message) {
+    const toast = document.getElementById('toast');
+    toast.innerText = message;
+    toast.style.display = 'block';
+    setTimeout(() => {
+        toast.style.display = 'none';
+    }, 2500);
+}
+
+function renderTable() {
+    const tbody = document.getElementById('tableBody');
+    tbody.innerHTML = '';
+    
+    itineraryData.forEach((item, index) => {
+        let tr = document.createElement('tr');
+        
+        let catClass = '';
+        if (item.category === '交通') catClass = 'cat-transport';
+        else if (item.category === '用餐') catClass = 'cat-meal';
+        else if (item.category === '景點') catClass = 'cat-attraction';
+        else if (item.category === '逛街') catClass = 'cat-shopping';
+        
+        let startLocked = (item.lock === 'start');
+        let endLocked = (item.lock === 'end');
+        let durLocked = (item.lock === 'duration');
+
+        tr.innerHTML = `
+            <td><input type="text" value="${item.date}" onchange="updateData(${index}, 'date', this.value)"></td>
+            <td>
+                <input type="time" value="${item.start}" ${startLocked?'readonly':''} onchange="handleInputChange(${index}, 'start', this.value)">
+                <button class="lock-btn ${startLocked?'locked':''}" onclick="toggleLock(${index}, 'start')">${startLocked?'🔒':'🔓'}</button>
+            </td>
+            <td>
+                <input type="time" value="${item.end}" ${endLocked?'readonly':''} onchange="handleInputChange(${index}, 'end', this.value)">
+                <button class="lock-btn ${endLocked?'locked':''}" onclick="toggleLock(${index}, 'end')">${endLocked?'🔒':'🔓'}</button>
+            </td>
+            <td>
+                <input type="number" value="${item.duration}" ${durLocked?'readonly':''} onchange="handleInputChange(${index}, 'duration', this.value)" style="width: 70px;"> 分鐘
+                <button class="lock-btn ${durLocked?'locked':''}" onclick="toggleLock(${index}, 'duration')">${durLocked?'🔒':'🔓'}</button>
+            </td>
+            <td>
+                <select class="${catClass}" onchange="updateCategory(${index}, this.value)">
+                    <option value="" ${item.category===''?'selected':''}></option>
+                    <option value="交通" ${item.category==='交通'?'selected':''}>交通</option>
+                    <option value="逛街" ${item.category==='逛街'?'selected':''}>逛街</option>
+                    <option value="景點" ${item.category==='景點'?'selected':''}>景點</option>
+                    <option value="用餐" ${item.category==='用餐'?'selected':''}>用餐</option>
+                </select>
+            </td>
+            <td><input type="text" value="${item.content}" onchange="updateData(${index}, 'content', this.value)" style="width: 95%;"></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function toggleLock(index, field) {
+    if (itineraryData[index].lock === field) {
+        itineraryData[index].lock = 'none';
+    } else {
+        itineraryData[index].lock = field;
+    }
+    renderTable();
+}
+
+const timeToMin = (t) => {
+    let parts = t.split(':');
+    return parseInt(parts[0])*60 + parseInt(parts[1]);
+};
+const minToTime = (m) => {
+    if (isNaN(m)) return "00:00";
+    if (m < 0) m += 1440;
+    let h = Math.floor(m / 60) % 24;
+    let min = m % 60;
+    return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+};
+
+function handleInputChange(index, field, value) {
+    let row = itineraryData[index];
+    row[field] = value;
+
+    let changedFields = [];
+    if (row.start !== row.baseline.start) changedFields.push('start');
+    if (row.end !== row.baseline.end) changedFields.push('end');
+    if (String(row.duration) !== String(row.baseline.duration)) changedFields.push('duration');
+
+    if (changedFields.length === 1) {
+        openLightbox(index, changedFields[0]);
+        return;
+    } else {
+        let targetToCalculate = '';
+        if (row.lock === 'start') targetToCalculate = 'start';
+        else if (row.lock === 'end') targetToCalculate = 'end';
+        else if (row.lock === 'duration') targetToCalculate = 'duration';
+        else {
+            let allFields = ['start', 'end', 'duration'];
+            let unChanged = allFields.filter(f => !changedFields.includes(f));
+            targetToCalculate = unChanged.length > 0 ? unChanged[0] : 'duration';
+        }
+
+        executeCalculation(index, targetToCalculate);
+    }
+}
+
+function openLightbox(index, changedField) {
+    let modal = document.getElementById('customModal');
+    let titleEl = document.getElementById('modalTitle');
+    let descEl = document.getElementById('modalDesc');
+    let btnContainer = document.getElementById('modalButtonsContainer');
+
+    let fieldNames = { 'start': '開始時間', 'end': '結束時間', 'duration': '總分鐘數' };
+    titleEl.innerText = `您修改了「${fieldNames[changedField]}」(第 ${index + 1} 列)`;
+    descEl.innerText = `請選擇要固定哪一個欄位來進行推算：`;
+    btnContainer.innerHTML = '';
+
+    let otherFields = ['start', 'end', 'duration'].filter(f => f !== changedField);
+
+    otherFields.forEach(targetField => {
+        let btn = document.createElement('button');
+        
+        if (changedField === 'start') {
+            if (targetField === 'duration') btn.innerText = `固定「總分鐘數」，推算結束時間`;
+            else btn.innerText = `固定「結束時間」，推算總分鐘數`;
+        } else if (changedField === 'duration') {
+            if (targetField === 'start') btn.innerText = `固定「開始時間」，推算結束時間`;
+            else btn.innerText = `固定「結束時間」，推算開始時間`;
+        } else if (changedField === 'end') {
+            if (targetField === 'start') btn.innerText = `固定「開始時間」，推算總分鐘數`;
+            else btn.innerText = `固定「總分鐘數」，推算開始時間`;
+        }
+
+        btn.onclick = () => {
+            executeSingleFieldChoice(index, changedField, targetField);
+            modal.style.display = 'none';
+        };
+        btnContainer.appendChild(btn);
+    });
+
+    modal.style.display = 'flex';
+}
+
+function executeSingleFieldChoice(index, changedField, targetField) {
+    let row = itineraryData[index];
+    let sMin = timeToMin(row.start);
+    let eMin = timeToMin(row.end);
+    let dur = parseInt(row.duration) || 0;
+
+    let targetCalculatedName = '';
+
+    if (changedField === 'start') {
+        if (targetField === 'duration') {
+            row.end = minToTime(sMin + dur);
+            targetCalculatedName = '結束時間';
+        } else {
+            row.duration = eMin - sMin;
+            if (row.duration < 0) row.duration += 1440;
+            targetCalculatedName = '總分鐘數';
+        }
+    } else if (changedField === 'duration') {
+        if (targetField === 'start') {
+            row.end = minToTime(sMin + dur);
+            targetCalculatedName = '結束時間';
+        } else {
+            row.start = minToTime(eMin - dur);
+            targetCalculatedName = '開始時間';
+        }
+    } else if (changedField === 'end') {
+        if (targetField === 'start') {
+            row.duration = eMin - sMin;
+            if (row.duration < 0) row.duration += 1440;
+            targetCalculatedName = '總分鐘數';
+        } else {
+            row.start = minToTime(eMin - dur);
+            targetCalculatedName = '開始時間';
+        }
+    }
+
+    showToast(`${targetCalculatedName}已修正`);
+
+    row.baseline = { start: row.start, end: row.end, duration: row.duration };
+    
+    // 執行雙向智慧串聯：向上影響前一列結束時間，向下影響後續各列開始時間
+    cascadeBidirectional(index);
+    renderTable();
+}
+
+function executeCalculation(index, targetToCalculate) {
+    let row = itineraryData[index];
+    let sMin = timeToMin(row.start);
+    let eMin = timeToMin(row.end);
+    let dur = parseInt(row.duration) || 0;
+
+    if (targetToCalculate === 'duration') {
+        row.duration = eMin - sMin;
+        if (row.duration < 0) row.duration += 1440;
+    } else if (targetToCalculate === 'end') {
+        row.end = minToTime(sMin + dur);
+    } else if (targetToCalculate === 'start') {
+        row.start = minToTime(eMin - dur);
+    }
+
+    row.baseline = { start: row.start, end: row.end, duration: row.duration };
+    cascadeBidirectional(index);
+    renderTable();
+}
+
+// 雙向無縫串聯邏輯
+function cascadeBidirectional(startIndex) {
+    // 1. 向上連動（從修改列往上影響前一列的結束時間）
+    for (let i = startIndex; i > 0; i--) {
+        let curr = itineraryData[i];
+        let prev = itineraryData[i - 1];
+        if (curr.date === prev.date || !prev.date || prev.date.trim() === "") {
+            prev.end = curr.start;
+            let psMin = timeToMin(prev.start);
+            let peMin = timeToMin(prev.end);
+            let pdur = peMin - psMin;
+            if (pdur < 0) pdur += 1440;
+            prev.duration = pdur;
+            prev.baseline = { start: prev.start, end: prev.end, duration: prev.duration };
+        }
+    }
+
+    // 2. 向下連動（從修改列往下影響後續各列的開始與結束時間）
+    for (let i = startIndex; i < itineraryData.length - 1; i++) {
+        let curr = itineraryData[i];
+        let next = itineraryData[i + 1];
+        if (curr.date === next.date || !next.date || next.date.trim() === "") {
+            next.start = curr.end;
+            let nsMin = timeToMin(next.start);
+            let ndur = parseInt(next.duration) || 60;
+            next.end = minToTime(nsMin + ndur);
+            next.baseline = { start: next.start, end: next.end, duration: next.duration };
+        }
+    }
+}
+
+function updateData(index, field, value) {
+    itineraryData[index][field] = value;
+    itineraryData[index].baseline[field] = value;
+}
+
+function updateCategory(index, value) {
+    itineraryData[index].category = value;
+    renderTable();
+}
+
+function addRow() {
+    let last = itineraryData[itineraryData.length - 1];
+    let newStart = last ? last.end : "08:30";
+    let newEnd = "09:30";
+    itineraryData.push({
+        date: last ? last.date : "10/29 (四)",
+        start: newStart,
+        end: newEnd,
+        duration: 60,
+        lock: "none",
+        baseline: { start: newStart, end: newEnd, duration: 60 },
+        category: "",
+        content: ""
+    });
+    cascadeBidirectional(itineraryData.length - 2);
+    renderTable();
+}
+
+function saveData() {
+    itineraryData.forEach(row => {
+        row.baseline = { start: row.start, end: row.end, duration: row.duration };
+    });
+    localStorage.setItem('hokkaido_itinerary_v11', JSON.stringify(itineraryData));
+    showToast('✅ 行程已成功儲存！基準點已重新記錄。');
+}
+
+function exportCSV() {
+    let csvContent = "\uFEFF日期,開始時間,結束時間,總分鐘數,類別,事項內容\n";
+    itineraryData.forEach(row => {
+        csvContent += `"${row.date}","${row.start}","${row.end}","${row.duration}","${row.category}","${row.content}"\n`;
+    });
+    let blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    let url = URL.createObjectURL(blob);
+    let a = document.createElement('a');
+    a.href = url;
+    a.download = '2026_北海道行程_燈箱互動版.csv';
+    a.click();
+}
+
+renderTable();
+</script>
+
+</body>
+</html>
