@@ -75,19 +75,19 @@ function rowMarkup(row,index,area){
  '<td class="order-cell"><span class="drag-handle" title="拖曳調整順序">⠿</span>'+(pending?'<span class="pending-tag">待放置</span>':"")+'</td>'+
  '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("start")+'" aria-label="開始時間" value="'+esc(row.start)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="start"?"disabled":"")+' data-field="start">'+(area==="day"?lockButton("start"):"")+'</div></td>'+
  '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("end")+'" aria-label="結束時間" value="'+esc(row.end)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="end"?"disabled":"")+' data-field="end">'+(area==="day"?lockButton("end"):"")+'</div></td>'+
- '<td><div class="duration-cell">'+(area==="day"?'<div class="duration-editor"><input type="number" class="duration-input'+inputClass("duration")+'" min="1" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"><span>分鐘</span>'+lockButton("duration")+'</div>':'')+'<span class="duration-display">'+formatDuration(row.duration)+'</span></div></td>'+
+ '<td><div class="duration-cell"><div class="duration-editor"><input type="number" class="duration-input'+inputClass("duration")+'" min="1" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"><span>分鐘</span>'+(area==="day"?lockButton("duration"):"")+'</div><span class="duration-display">'+formatDuration(row.duration)+'</span></div></td>'+
  '<td><select class="category-select" aria-label="類別" style="background-color:'+color+'" data-field="category">'+categoryOptions(row.category)+'</select></td>'+
  '<td><input class="content-input" type="text" aria-label="行程內容" value="'+esc(row.content)+'" placeholder="輸入行程內容" data-field="content"></td>'+
- '<td class="row-actions">'+(area==="day"?(pending?'<button class="button small primary" data-action="place">放置此處</button><button class="button small secondary" data-action="stage">移至暫存</button>':'<button class="button small secondary" data-action="move">移至日期</button><button class="button small secondary" data-action="stage">移至暫存</button>'):'<button class="button small secondary" data-action="move">移至日期</button>')+'</td>'+
+ '<td class="row-actions">'+(area==="day"?(pending?'<button class="button small primary" data-action="place">放置此處</button><button class="button small secondary" data-action="stage">移至暫存</button>':'<button class="button small secondary" data-action="move">移至其他日期</button><button class="button small secondary" data-action="stage">移至暫存</button>'):'<button class="button small secondary" data-action="move">移至其他日期</button>')+'</td>'+
  '<td><button class="icon-button" data-action="delete" aria-label="刪除行程">×</button></td></tr>';
 }
 function bindRows(root,area){
  root.querySelectorAll("tr[data-id]").forEach(tr=>{const row=getRow(area,tr.dataset.id);
   tr.addEventListener("focusin",()=>{if(row.isNew){row.isNew=false;tr.classList.remove("new-row-highlight");persist();}});
   tr.addEventListener("dragstart",e=>{if(e.target.closest("input,select,button")){e.preventDefault();return;}draggedRow={type:"row",area,id:row.id};e.dataTransfer.effectAllowed="move";});
-  tr.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&draggedRow.area===area){e.preventDefault();tr.classList.add("drag-over");}});
+  tr.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"))){e.preventDefault();tr.classList.add("drag-over");}});
   tr.addEventListener("dragleave",()=>tr.classList.remove("drag-over"));
-  tr.addEventListener("drop",e=>{e.preventDefault();tr.classList.remove("drag-over");reorderRow(area,draggedRow&&draggedRow.id,row.id);});
+  tr.addEventListener("drop",e=>{e.preventDefault();tr.classList.remove("drag-over");if(area==="day"&&draggedRow&&draggedRow.type==="row"&&draggedRow.area==="staging"){const stagingRow=getRow("staging",draggedRow.id);if(stagingRow)moveStagingRowToDay(stagingRow,row.id);return;}reorderRow(area,draggedRow&&draggedRow.id,row.id);});
   tr.querySelectorAll("[data-field]").forEach(input=>input.addEventListener("change",()=>{
    const field=input.dataset.field;
    if(area==="day"&&!row.pending&&["start","end","duration"].includes(field))handleTimeEdit(row.id,field,input.value);
@@ -188,6 +188,13 @@ function moveRowToStaging(row){
  const backup=structuredClone(list);list.splice(index,1);row.start="";row.end="";row.date="";row.pending=false;row.lock="none";row.isNew=false;state.staging.push(row);
  const error=cascadeFrom(Math.max(0,index-1));if(error){state.staging.pop();state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}
  draggedRow=null;persist();render();showToast("行程已移至共用暫存區，時間已重新串聯");
+}
+function moveStagingRowToDay(row,targetId){
+ if(!state.activeDate)return;
+ const stagingIndex=state.staging.indexOf(row);if(stagingIndex<0)return;state.staging.splice(stagingIndex,1);
+ row.date=state.activeDate;row.pending=true;row.lock="none";row.isNew=false;
+ const rows=activeRows(),targetIndex=targetId?rows.findIndex(item=>item.id===targetId):-1;rows.splice(targetIndex<0?rows.length:targetIndex,0,row);
+ draggedRow=null;persist();render();showToast("行程已移至 "+dateLabel(state.activeDate)+"，確認位置後按「放置此處」");
 }
 function confirmDeleteRow(area,row){
  const detail=document.createElement("div"),intro=document.createElement("p"),item=document.createElement("div");
@@ -315,6 +322,10 @@ const stagingSection=document.getElementById("stagingSection");
 stagingSection.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&draggedRow.area==="day"){e.preventDefault();stagingSection.classList.add("drop-target");}});
 stagingSection.addEventListener("dragleave",e=>{if(!stagingSection.contains(e.relatedTarget))stagingSection.classList.remove("drop-target");});
 stagingSection.addEventListener("drop",e=>{e.preventDefault();stagingSection.classList.remove("drop-target");if(!draggedRow||draggedRow.type!=="row"||draggedRow.area!=="day")return;const row=getRow("day",draggedRow.id);if(row)moveRowToStaging(row);});
+const emptyDay=document.getElementById("emptyDay");
+emptyDay.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&draggedRow.area==="staging"){e.preventDefault();emptyDay.classList.add("drag-over");}});
+emptyDay.addEventListener("dragleave",()=>emptyDay.classList.remove("drag-over"));
+emptyDay.addEventListener("drop",e=>{e.preventDefault();emptyDay.classList.remove("drag-over");if(!draggedRow||draggedRow.type!=="row"||draggedRow.area!=="staging")return;const row=getRow("staging",draggedRow.id);if(row)moveStagingRowToDay(row);});
 document.getElementById("exportJsonButton").addEventListener("click",exportJSON);
 document.getElementById("importJsonButton").addEventListener("click",()=>document.getElementById("importFile").click());
 document.getElementById("importFile").addEventListener("change",e=>{if(e.target.files[0])importJSON(e.target.files[0]);e.target.value="";});
