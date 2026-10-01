@@ -152,7 +152,7 @@ function handleTimeEdit(id,field,value){
   else if(row.lock==="duration"){if(field==="start"){row.end=minToTime(timeToMin(row.start)+Number(row.duration));calculatedField="結束時間";}else if(field==="end"){row.start=minToTime(timeToMin(row.end)-Number(row.duration));calculatedField="開始時間";}}
   return finishTimeEdit(row,index,backup,field,calculatedField);
  }
- if(!row.start&&!row.end){row[field]=parsed;if(field==="start"&&row.start)row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));if(field==="end"&&row.end)row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));persist();render();return;}
+ if(!row.start&&!row.end){row[field]=parsed;if(field==="start"&&row.start){row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"結束時間");}if(field==="end"&&row.end){row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"開始時間");}persist();render();return;}
  if(field==="start"&&!row.end){row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"結束時間");}
  if(field==="end"&&!row.start){row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"開始時間");}
  const question=field==="start"?"開始時間已修改，請選擇要固定的欄位。":field==="end"?"結束時間已修改，請選擇要固定的欄位。":"總時長已修改，請選擇要固定的欄位。";
