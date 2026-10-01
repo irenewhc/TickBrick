@@ -1,58 +1,66 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-TW">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>行程樂高 TickBrick</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg width='400' height='400' viewBox='0 0 400 400' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cg opacity='0.5'%3E%3Cpath d='M102.962 235.733C131.858 235.733 146.312 235.727 155.29 244.702C164.267 253.68 164.274 268.132 164.274 297.03C164.274 325.927 164.267 340.38 155.29 349.357C146.312 358.33 131.856 358.325 102.962 358.325C74.0749 358.325 59.6284 358.328 50.6511 349.357C41.6739 340.38 41.6667 325.927 41.6667 297.03C41.6667 268.132 41.6737 253.68 50.6511 244.702C59.6282 235.73 74.0729 235.733 102.962 235.733Z' fill='%23C1CE00'/%3E%3Cpath d='M271.55 235.733C300.445 235.733 314.9 235.727 323.877 244.702C332.855 253.68 332.862 268.132 332.862 297.03C332.862 325.927 332.855 340.38 323.877 349.357C314.9 358.33 300.443 358.325 271.55 358.325C242.662 358.325 228.215 358.328 219.238 349.357C210.262 340.38 210.253 325.927 210.253 297.03C210.253 268.132 210.262 253.68 219.238 244.702C228.215 235.73 242.66 235.733 271.55 235.733Z' fill='%23C1CE00'/%3E%3Cpath d='M102.962 67.1468C131.86 67.1468 146.312 67.1537 155.29 76.1312C164.265 85.1082 164.274 99.5507 164.274 128.442C164.274 157.34 164.267 171.792 155.29 180.77C146.312 189.747 131.86 189.755 102.962 189.755C74.0706 189.755 59.6281 189.745 50.6511 180.77C41.6737 171.792 41.6667 157.34 41.6667 128.442C41.6667 99.5487 41.6743 85.108 50.6511 76.1312C59.6279 67.1543 74.0686 67.1468 102.962 67.1468Z' fill='%23C1CE00'/%3E%3C/g%3E%3Cpath d='M252.138 50.9654C230.045 73.6089 219 84.9308 219 98.9996C219 113.069 230.045 124.39 252.138 147.034C274.229 169.676 285.274 181 298.999 181C312.726 181 323.771 169.678 345.862 147.034C367.953 124.391 379 113.068 379 98.9996C379 84.9308 367.955 73.6089 345.862 50.9654C323.771 28.3217 312.726 17 298.999 17C285.274 17 274.229 28.3217 252.138 50.9654Z' fill='%237371FF'/%3E%3C/svg%3E ">
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>行程樂高 TickBrick</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='10' y='10' width='80' height='80' rx='24' fill='%237371ff'/%3E%3Cpath d='M25 50h50M50 25v50' stroke='white' stroke-width='12'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
 </head>
-
 <body>
-
-    <div class="container">
-        <h1>行程樂高</h1>
-        <p class="subtitle">2026/10/29 ~ 11/6 北海道</p>
-
-        <div class="toolbar">
-            <div>
-                <button onclick="addRow()">＋ 新增行程</button>
-                <button onclick="saveData()" style="background: #c7c5c7; margin-left: 10px;">儲存</button>
-            </div>
-            <button onclick="exportCSV()" style="background: #4c56e1;">匯出 CSV</button>
+  <main class="container">
+    <header class="page-header">
+      <div><h1>行程樂高</h1><p class="subtitle">北海道行程規劃</p></div>
+      <div class="header-actions">
+        <button id="calendarToggle" class="button secondary" type="button">📅 選擇日期</button>
+        <div id="calendarPopover" class="calendar-popover" hidden>
+          <div class="calendar-heading"><button id="calendarPrev" aria-label="上個月">‹</button><strong id="calendarMonth"></strong><button id="calendarNext" aria-label="下個月">›</button></div>
+          <div class="calendar-grid" id="calendarGrid"></div>
+          <div class="calendar-legend"><span><i class="legend-has"></i>已有日期頁籤</span><span><i class="legend-none"></i>尚未建立</span></div>
         </div>
+      </div>
+    </header>
 
+    <nav class="date-navigation" aria-label="行程日期">
+      <div id="dateTabs" class="date-tabs" role="tablist"></div>
+      <button id="addDateButton" class="button add-date" type="button">＋ 新增日期</button>
+    </nav>
+
+    <section class="toolbar" aria-label="行程工具">
+      <div class="toolbar-group">
+        <button id="addRowButton" class="button primary" type="button">＋ 新增行程</button>
+        <button id="exportJsonButton" class="button secondary" type="button">匯出備份 JSON</button>
+        <button id="importJsonButton" class="button secondary" type="button">匯入備份 JSON</button>
+        <button id="exportCsvButton" class="button secondary" type="button">匯出 CSV</button>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
+      </div>
+      <div class="toolbar-group">
+        <button id="exportImageButton" class="button secondary" type="button">匯出圖片</button>
+        <button id="exportPdfButton" class="button secondary" type="button">匯出 PDF</button>
+      </div>
+    </section>
+
+    <section class="day-section">
+      <div class="section-heading"><div><h2 id="activeDateTitle"></h2><p id="daySummary"></p></div><button id="deleteDateButton" class="button danger-outline" type="button">刪除此日期</button></div>
+      <div class="table-wrap">
         <table id="itineraryTable">
-            <thead>
-                <tr>
-                    <th>排序</th>
-                    <th>日期</th>
-                    <th>開始時間</th>
-                    <th>結束時間</th>
-                    <th>總時長</th>
-                    <th>類別</th>
-                    <th>行程內容</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody id="tableBody"></tbody>
+          <thead><tr><th class="order-col">排序</th><th class="start-col">開始時間</th><th class="end-col">結束時間</th><th class="duration-col">總時長</th><th class="category-col">類別</th><th>行程內容</th><th class="move-col">移動</th><th class="delete-col">刪除</th></tr></thead>
+          <tbody id="tableBody"></tbody>
         </table>
-    </div>
+        <div id="emptyDay" class="empty-state" hidden>這一天目前沒有行程。你可以新增行程，或將暫存項目放到這一天。</div>
+      </div>
+    </section>
 
-    <!-- 燈箱 Modal -->
-    <div id="customModal" class="modal-overlay">
-        <div class="modal-box">
-            <h3 id="modalTitle">提示訊息</h3>
-            <p id="modalDesc" style="color: #666; font-size: 14px; line-height: 1.5;"></p>
-            <div class="modal-buttons" id="modalButtonsContainer"></div>
-        </div>
-    </div>
+    <section id="stagingSection" class="staging-section">
+      <div class="section-heading"><div><h2>共用暫存區</h2><p>暫存項目不屬於任何日期；放置到行程後才會加入時間連動。</p></div><span id="stagingCount" class="count-badge"></span></div>
+      <div class="table-wrap"><table><thead><tr><th class="order-col">排序</th><th class="start-col">開始時間</th><th class="end-col">結束時間</th><th class="duration-col">總時長</th><th class="category-col">類別</th><th>行程內容</th><th class="move-col">移動</th><th class="delete-col">刪除</th></tr></thead><tbody id="stagingBody"></tbody></table><div id="emptyStaging" class="empty-state" hidden>暫存區目前是空的。</div></div>
+    </section>
 
-    <div id="toast">提示訊息</div>
+    <section class="category-settings"><details><summary>類別顏色</summary><div id="categoryColors" class="category-color-list"></div></details></section>
+  </main>
 
-    <script src="script.js" defer></script>
-
+  <dialog id="appDialog" class="app-dialog"><form method="dialog"><h2 id="dialogTitle"></h2><div id="dialogContent"></div><div id="dialogActions" class="dialog-actions"></div></form></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="script.js" defer></script>
 </body>
-
 </html>
