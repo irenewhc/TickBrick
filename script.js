@@ -64,7 +64,7 @@ function renderStaging(){
  const root=document.getElementById("stagingBody");document.getElementById("stagingCount").textContent=state.staging.length+" 項";document.getElementById("emptyStaging").hidden=state.staging.length>0;
  root.innerHTML=state.staging.map((row,index)=>rowMarkup(row,index,"staging")).join("");bindRows(root,"staging");
 }
-function categoryOptions(value){return'<option value="">未分類</option>'+state.categories.map(c=>'<option value="'+esc(c.name)+'" '+(value===c.name?"selected":"")+'>'+esc(c.name)+'</option>').join("");}
+function categoryOptions(value){return'<option value=""></option>'+state.categories.map(c=>'<option value="'+esc(c.name)+'" '+(value===c.name?"selected":"")+'>'+esc(c.name)+'</option>').join("");}
 function rowMarkup(row,index,area){
  const color=(state.categories.find(c=>c.name===row.category)||{}).color||"#FFFFFF",pending=!!row.pending;
  const rowClass=["schedule-row",pending?"pending-row":"",area==="day"&&row.isNew?"new-row-highlight":"",lockedConflictId===row.id?"conflict-highlight":""].filter(Boolean).join(" ");
@@ -273,7 +273,7 @@ function renderScheduleCanvas(date,rowSubset,continuation){
  let y=205;const left=70,w1=240,w2=240;ctx.fillStyle="#2c3e50";ctx.fillRect(left,y,1100,56);ctx.fillStyle="#fff";ctx.font="bold 23px sans-serif";ctx.fillText("時間／時長",left+14,y+37);ctx.fillText("類別",left+w1+14,y+37);ctx.fillText("行程內容",left+w1+w2+14,y+37);y+=56;
  prepared.forEach(({row,lines,height})=>{ctx.fillStyle=row.pending?"#fff7dd":"#fff";ctx.fillRect(left,y,1100,height);ctx.strokeStyle="#d9dee4";ctx.strokeRect(left,y,1100,height);
   ctx.fillStyle="#222";ctx.font="26px sans-serif";ctx.fillText(row.start&&row.end?row.start+"–"+row.end:"—",left+14,y+38);ctx.font="20px sans-serif";ctx.fillStyle="#666";ctx.fillText(formatDuration(row.duration),left+14,y+68);
-  ctx.fillStyle=(state.categories.find(c=>c.name===row.category)||{}).color||"#fff";ctx.fillRect(left+w1+8,y+10,110,height-20);ctx.fillStyle="#222";ctx.font="22px sans-serif";ctx.fillText(row.category||"未分類",left+w1+15,y+42);
+  ctx.fillStyle=(state.categories.find(c=>c.name===row.category)||{}).color||"#fff";ctx.fillRect(left+w1+8,y+10,110,height-20);ctx.fillStyle="#222";ctx.font="22px sans-serif";ctx.fillText(row.category||"",left+w1+15,y+42);
   ctx.fillStyle="#222";ctx.font="26px sans-serif";lines.forEach((line,i)=>ctx.fillText(line,left+w1+w2+14,y+38+i*38));if(row.pending){ctx.fillStyle="#9a6700";ctx.font="18px sans-serif";ctx.fillText("待放置",left+1000,y+30);}y+=height;});return canvas;
 }
 function wrapText(ctx,text,size,width){ctx.font=size+"px sans-serif";const lines=[];let line="";for(const char of text){if(ctx.measureText(line+char).width>width&&line){lines.push(line);line=char;}else line+=char;}if(line||!lines.length)lines.push(line);return lines;}
@@ -317,7 +317,7 @@ document.getElementById("addRowButton").addEventListener("click",addRow);
 document.getElementById("calendarToggle").addEventListener("click",()=>openCalendar(true));
 document.getElementById("calendarPrev").addEventListener("click",()=>{activeCalendarMonth.setMonth(activeCalendarMonth.getMonth()-1);renderCalendar();});
 document.getElementById("calendarNext").addEventListener("click",()=>{activeCalendarMonth.setMonth(activeCalendarMonth.getMonth()+1);renderCalendar();});
-document.addEventListener("click",e=>{const pop=document.getElementById("calendarPopover");if(!pop.contains(e.target)&&!document.getElementById("calendarToggle").contains(e.target))pop.hidden=true;});
+document.addEventListener("click",e=>{const pop=document.getElementById("calendarPopover"),menu=document.querySelector(".export-menu");if(!pop.contains(e.target)&&!document.getElementById("calendarToggle").contains(e.target))pop.hidden=true;if(menu.open&&!menu.contains(e.target))menu.open=false;});
 const stagingSection=document.getElementById("stagingSection");
 stagingSection.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&draggedRow.area==="day"){e.preventDefault();stagingSection.classList.add("drop-target");}});
 stagingSection.addEventListener("dragleave",e=>{if(!stagingSection.contains(e.relatedTarget))stagingSection.classList.remove("drop-target");});
