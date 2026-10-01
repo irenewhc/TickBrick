@@ -46,9 +46,10 @@ function activeRows(){return state.days[state.activeDate]||[];}
 function render(){renderTabs();renderDay();renderStaging();renderCategories();renderCalendar();}
 function renderTabs(){
  const root=document.getElementById("dateTabs");root.innerHTML="";
- state.dates.forEach((date,index)=>{const tab=document.createElement("button");tab.type="button";tab.className="date-tab"+(date===state.activeDate?" active":"");tab.textContent=dateLabel(date);tab.setAttribute("role","tab");tab.setAttribute("aria-selected",date===state.activeDate?"true":"false");tab.draggable=true;tab.dataset.date=date;
-  tab.addEventListener("click",()=>{state.activeDate=date;activeCalendarMonth=new Date(date+"T12:00:00");persist();render();});
-  tab.addEventListener("dragstart",e=>{draggedRow={type:"tab",index};e.dataTransfer.effectAllowed="move";});
+ state.dates.forEach((date,index)=>{const tab=document.createElement("div");tab.className="date-tab"+(date===state.activeDate?" active":"");tab.draggable=true;tab.dataset.date=date;
+  const select=document.createElement("button");select.type="button";select.className="date-tab-select";select.textContent=dateLabel(date);select.setAttribute("role","tab");select.setAttribute("aria-selected",date===state.activeDate?"true":"false");select.addEventListener("click",()=>{state.activeDate=date;activeCalendarMonth=new Date(date+"T12:00:00");persist();render();});
+  const close=document.createElement("button");close.type="button";close.className="date-tab-close";close.textContent="×";close.setAttribute("aria-label","刪除 "+dateLabel(date,true));close.draggable=false;close.addEventListener("click",e=>{e.stopPropagation();deleteDate(date);});tab.append(select,close);
+  tab.addEventListener("dragstart",e=>{if(e.target.closest(".date-tab-close")){e.preventDefault();return;}draggedRow={type:"tab",index};e.dataTransfer.effectAllowed="move";});
   tab.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="tab")e.preventDefault();});
   tab.addEventListener("drop",e=>{e.preventDefault();if(!draggedRow||draggedRow.type!=="tab")return;const from=draggedRow.index,item=state.dates.splice(from,1)[0];state.dates.splice(index,0,item);draggedRow=null;persist();renderTabs();});root.appendChild(tab);
  });
@@ -57,7 +58,7 @@ function renderDay(){
  const rows=activeRows();document.getElementById("activeDateTitle").textContent=state.activeDate?dateLabel(state.activeDate,true):"尚未建立日期";
  document.getElementById("daySummary").textContent=rows.length?rows.length+" 項行程":"尚無行程";document.getElementById("emptyDay").hidden=rows.length>0;
  document.getElementById("addRowButton").disabled=!state.activeDate;
- const root=document.getElementById("tableBody");root.innerHTML=rows.map((row,index)=>rowMarkup(row,index,"day")).join("");document.getElementById("deleteDateButton").disabled=!state.activeDate;bindRows(root,"day");
+ const root=document.getElementById("tableBody");root.innerHTML=rows.map((row,index)=>rowMarkup(row,index,"day")).join("");bindRows(root,"day");
 }
 function renderStaging(){
  const root=document.getElementById("stagingBody");document.getElementById("stagingCount").textContent=state.staging.length+" 項";document.getElementById("emptyStaging").hidden=state.staging.length>0;
@@ -74,7 +75,7 @@ function rowMarkup(row,index,area){
  '<td class="order-cell"><span class="drag-handle" title="拖曳調整順序">⠿</span>'+(pending?'<span class="pending-tag">待放置</span>':"")+'</td>'+
  '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("start")+'" aria-label="開始時間" value="'+esc(row.start)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="start"?"disabled":"")+' data-field="start">'+(area==="day"?lockButton("start"):"")+'</div></td>'+
  '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("end")+'" aria-label="結束時間" value="'+esc(row.end)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="end"?"disabled":"")+' data-field="end">'+(area==="day"?lockButton("end"):"")+'</div></td>'+
- '<td><div class="duration-cell"><input type="number" class="duration-input'+inputClass("duration")+'" min="1" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"><span>分鐘</span>'+(area==="day"?lockButton("duration"):"")+'</div></td>'+
+ '<td><div class="duration-cell">'+(area==="day"?'<div class="duration-editor"><input type="number" class="duration-input'+inputClass("duration")+'" min="1" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"><span>分鐘</span>'+lockButton("duration")+'</div>':'')+'<span class="duration-display">'+formatDuration(row.duration)+'</span></div></td>'+
  '<td><select class="category-select" aria-label="類別" style="background-color:'+color+'" data-field="category">'+categoryOptions(row.category)+'</select></td>'+
  '<td><input class="content-input" type="text" aria-label="行程內容" value="'+esc(row.content)+'" placeholder="輸入行程內容" data-field="content"></td>'+
  '<td class="row-actions">'+(area==="day"?(pending?'<button class="button small primary" data-action="place">放置此處</button><button class="button small secondary" data-action="stage">移至暫存</button>':'<button class="button small secondary" data-action="move">移至日期</button><button class="button small secondary" data-action="stage">移至暫存</button>'):'<button class="button small secondary" data-action="move">移至日期</button>')+'</td>'+
@@ -138,6 +139,7 @@ function formatTime(value){let str=String(value||"").replace(/[^\d:]/g,"");if(!s
 function timeToMin(value){const p=String(value||"00:00").split(":");return Number(p[0])*60+Number(p[1]);}
 function minToTime(value){const m=((Math.round(value)%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");}
 function durationBetween(start,end){let d=timeToMin(end)-timeToMin(start);if(d<0)d+=1440;return d||1;}
+function formatDuration(value){const total=Math.max(1,Number(value)||1),hours=Math.floor(total/60),minutes=total%60;return hours?(hours+"時"+(minutes?minutes+"分":"")):minutes+"分";}
 function handleTimeEdit(id,field,value){
  modifiedRowId=null;modifiedField=null;lockedConflictId=null;
  const row=getRow("day",id);if(!row)return;if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");renderDay();return;}
@@ -177,9 +179,15 @@ function addRow(){
 function rowAction(area,id,action){
  const row=getRow(area,id);if(!row)return;
  if(action==="delete")return confirmDeleteRow(area,row);
- if(action==="stage"){const list=getList(area),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;list.splice(index,1);row.start="";row.end="";row.date="";row.pending=false;row.lock="none";row.isNew=false;state.staging.push(row);if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.staging.pop();state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}}persist();render();}
+ if(action==="stage")moveRowToStaging(row);
  if(action==="place")placePending(row);
  if(action==="move")chooseDate(target=>moveToDate(area,row,target));
+}
+function moveRowToStaging(row){
+ const list=activeRows(),index=list.indexOf(row);if(index<0)return;
+ const backup=structuredClone(list);list.splice(index,1);row.start="";row.end="";row.date="";row.pending=false;row.lock="none";row.isNew=false;state.staging.push(row);
+ const error=cascadeFrom(Math.max(0,index-1));if(error){state.staging.pop();state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}
+ draggedRow=null;persist();render();showToast("行程已移至共用暫存區，時間已重新串聯");
 }
 function confirmDeleteRow(area,row){
  const detail=document.createElement("div"),intro=document.createElement("p"),item=document.createElement("div");
@@ -229,15 +237,13 @@ function chooseDate(callback){
  prev.addEventListener("click",()=>{month.setMonth(month.getMonth()-1);draw();});next.addEventListener("click",()=>{month.setMonth(month.getMonth()+1);draw();});draw();content.append(hint,heading,grid,legend,selection);
  openDialog("移至日期",content,[{text:"移至所選日期",cls:"primary",run:()=>callback(selected)},{text:"取消",cls:"secondary"}]);
 }
-function addDateFromCalendar(){openCalendar(true);}
-function deleteDate(){const date=state.activeDate;if(!date)return;askConfirm("刪除日期頁籤","刪除 "+dateLabel(date,true)+" 與這一天的所有行程嗎？此操作無法復原。","刪除此日期",()=>{const idx=state.dates.indexOf(date);state.dates.splice(idx,1);delete state.days[date];state.activeDate=state.dates[Math.min(idx,state.dates.length-1)]||"";if(state.activeDate)activeCalendarMonth=new Date(state.activeDate+"T12:00:00");persist();render();});}
+function deleteDate(date=state.activeDate){if(!date)return;askConfirm("刪除日期頁籤","刪除 "+dateLabel(date,true)+" 與這一天的所有行程嗎？此操作無法復原。","刪除此日期",()=>{const idx=state.dates.indexOf(date);state.dates.splice(idx,1);delete state.days[date];if(state.activeDate===date)state.activeDate=state.dates[Math.min(idx,state.dates.length-1)]||"";if(state.activeDate)activeCalendarMonth=new Date(state.activeDate+"T12:00:00");persist();render();});}
 
 /* 現有類別顏色可以自訂，並納入自動保存及備份。 */
 function renderCategories(){const root=document.getElementById("categoryColors");root.innerHTML="";state.categories.forEach(category=>{const label=document.createElement("label");label.className="category-color";const name=document.createElement("span");name.textContent=category.name;const input=document.createElement("input");input.type="color";input.value=category.color;input.setAttribute("aria-label",category.name+" 顏色");input.addEventListener("input",()=>{category.color=input.value;persist();renderDay();renderStaging();});label.append(name,input);root.appendChild(label);});}
 
 /* JSON 匯入匯出保存完整日期、排序、暫存與類別顏色。 */
 function exportJSON(){downloadBlob(new Blob([JSON.stringify({app:"TickBrick",version:1,exportedAt:new Date().toISOString(),data:state},null,2)],{type:"application/json"}),"TickBrick_行程備份_"+todayString()+".json");}
-function exportCSV(){const rows=state.dates.slice().sort().flatMap(date=>(state.days[date]||[]).map(row=>[date,row.start,row.end,row.duration,row.category,row.content]));const quote=value=>'"'+String(value==null?"":value).replace(/"/g,'""')+'"';const csv="\uFEFF日期,開始時間,結束時間,總時長,類別,行程內容\n"+rows.map(row=>row.map(quote).join(",")).join("\n");downloadBlob(new Blob([csv],{type:"text/csv;charset=utf-8"}),"TickBrick_行程_"+todayString()+".csv");}
 function importJSON(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result),raw=parsed.data||parsed;if(!Array.isArray(raw)&&(!raw||typeof raw!=="object"||!Array.isArray(raw.dates)))throw new Error("format");const imported=normalizeState(raw);askConfirm("匯入並取代現有資料","匯入備份會取代目前所有日期、行程、暫存項目與類別顏色。確定繼續嗎？","取代並匯入",()=>{state=imported;if(state.activeDate)activeCalendarMonth=new Date(state.activeDate+"T12:00:00");persist();render();showToast("備份匯入完成");});}catch(error){showToast("無法讀取此 JSON 行程備份");}};reader.readAsText(file,"UTF-8");}
 function todayString(){return new Date().toISOString().slice(0,10);}
 function downloadBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}
@@ -247,8 +253,8 @@ function openExportDialog(kind){
  if(!state.dates.length){showToast("請先新增日期頁籤");return;}
  const content=document.createElement("div");content.className="export-options";const all=document.createElement("label");all.className="select-all";all.innerHTML='<input type="checkbox" checked> 選取全部日期';content.appendChild(all);
  const list=document.createElement("div");list.className="export-date-list";state.dates.slice().sort().forEach(date=>{const label=document.createElement("label");label.innerHTML='<input type="checkbox" value="'+date+'" checked> '+esc(dateLabel(date,true));list.appendChild(label);});content.appendChild(list);
- const allInput=all.querySelector("input");allInput.addEventListener("change",()=>list.querySelectorAll("input").forEach(i=>i.checked=allInput.checked));list.addEventListener("change",()=>allInput.checked=[...list.querySelectorAll("input")].every(i=>i.checked));
- if(kind==="pdf"){const mode=document.createElement("fieldset");mode.className="pdf-mode";mode.innerHTML='<legend>多日期 PDF 方式</legend><label><input type="radio" name="pdfMode" value="merged" checked> 合併成一份 PDF（一天至少一頁）</label><label><input type="radio" name="pdfMode" value="separate"> 每天一份 PDF（多份時打包 ZIP）</label>';content.appendChild(mode);}
+ const allInput=all.querySelector("input");let updatePdfMode=()=>{};allInput.addEventListener("change",()=>{list.querySelectorAll("input").forEach(i=>i.checked=allInput.checked);updatePdfMode();});list.addEventListener("change",()=>{allInput.checked=[...list.querySelectorAll("input")].every(i=>i.checked);updatePdfMode();});
+ if(kind==="pdf"){const mode=document.createElement("fieldset");mode.className="pdf-mode";mode.innerHTML='<legend>多日期 PDF 方式</legend><label><input type="radio" name="pdfMode" value="merged" checked> 合併成一份 PDF（一天至少一頁） <span class="option-hint" hidden>需選擇至少兩個日期</span></label><label><input type="radio" name="pdfMode" value="separate"> 每天一份 PDF（多份時打包 ZIP）</label>';content.appendChild(mode);updatePdfMode=()=>{const merged=mode.querySelector('input[value="merged"]'),separate=mode.querySelector('input[value="separate"]'),hint=mode.querySelector(".option-hint"),count=list.querySelectorAll("input:checked").length,available=count>=2;merged.disabled=!available;hint.hidden=available;if(!available)separate.checked=true;};updatePdfMode();}
  openDialog(kind==="image"?"匯出圖片":"匯出 PDF",content,[{text:"匯出所選日期",cls:"primary",run:()=>{const dates=[...list.querySelectorAll("input:checked")].map(i=>i.value);if(!dates.length){showToast("至少選擇一個日期");return;}if(kind==="image")exportImages(dates);else exportPdfs(dates,content.querySelector('input[name="pdfMode"]:checked').value);}},{text:"取消",cls:"secondary"}]);
 }
 function exportImages(dates){const files=dates.map(date=>({name:date+".png",data:dataUrlBytes(renderScheduleCanvas(date).toDataURL("image/png"))}));if(files.length===1)downloadBlob(new Blob([files[0].data],{type:"image/png"}),files[0].name);else downloadBlob(zipFiles(files),"TickBrick_圖片_"+dates[0]+"_"+dates[dates.length-1]+".zip");}
@@ -259,7 +265,7 @@ function renderScheduleCanvas(date,rowSubset,continuation){
  ctx.fillStyle="#263746";ctx.font="bold 44px sans-serif";ctx.fillText("行程樂高",80,100);ctx.font="28px sans-serif";ctx.fillStyle="#555";ctx.fillText(dateLabel(date,true)+(continuation?"（續）":""),80,150);
  let y=205;const left=70,w1=240,w2=240;ctx.fillStyle="#2c3e50";ctx.fillRect(left,y,1100,56);ctx.fillStyle="#fff";ctx.font="bold 23px sans-serif";ctx.fillText("時間／時長",left+14,y+37);ctx.fillText("類別",left+w1+14,y+37);ctx.fillText("行程內容",left+w1+w2+14,y+37);y+=56;
  prepared.forEach(({row,lines,height})=>{ctx.fillStyle=row.pending?"#fff7dd":"#fff";ctx.fillRect(left,y,1100,height);ctx.strokeStyle="#d9dee4";ctx.strokeRect(left,y,1100,height);
-  ctx.fillStyle="#222";ctx.font="26px sans-serif";ctx.fillText(row.start&&row.end?row.start+"–"+row.end:"—",left+14,y+38);ctx.font="20px sans-serif";ctx.fillStyle="#666";ctx.fillText(row.duration+" 分鐘",left+14,y+68);
+  ctx.fillStyle="#222";ctx.font="26px sans-serif";ctx.fillText(row.start&&row.end?row.start+"–"+row.end:"—",left+14,y+38);ctx.font="20px sans-serif";ctx.fillStyle="#666";ctx.fillText(formatDuration(row.duration),left+14,y+68);
   ctx.fillStyle=(state.categories.find(c=>c.name===row.category)||{}).color||"#fff";ctx.fillRect(left+w1+8,y+10,110,height-20);ctx.fillStyle="#222";ctx.font="22px sans-serif";ctx.fillText(row.category||"未分類",left+w1+15,y+42);
   ctx.fillStyle="#222";ctx.font="26px sans-serif";lines.forEach((line,i)=>ctx.fillText(line,left+w1+w2+14,y+38+i*38));if(row.pending){ctx.fillStyle="#9a6700";ctx.font="18px sans-serif";ctx.fillText("待放置",left+1000,y+30);}y+=height;});return canvas;
 }
@@ -301,14 +307,15 @@ function askConfirm(title,message,confirmText,onConfirm){openDialog(title,messag
 
 /* 連接畫面事件並首次繪製。 */
 document.getElementById("addRowButton").addEventListener("click",addRow);
-document.getElementById("addDateButton").addEventListener("click",addDateFromCalendar);
-document.getElementById("deleteDateButton").addEventListener("click",deleteDate);
-document.getElementById("calendarToggle").addEventListener("click",openCalendar);
+document.getElementById("calendarToggle").addEventListener("click",()=>openCalendar(true));
 document.getElementById("calendarPrev").addEventListener("click",()=>{activeCalendarMonth.setMonth(activeCalendarMonth.getMonth()-1);renderCalendar();});
 document.getElementById("calendarNext").addEventListener("click",()=>{activeCalendarMonth.setMonth(activeCalendarMonth.getMonth()+1);renderCalendar();});
 document.addEventListener("click",e=>{const pop=document.getElementById("calendarPopover");if(!pop.contains(e.target)&&!document.getElementById("calendarToggle").contains(e.target))pop.hidden=true;});
+const stagingSection=document.getElementById("stagingSection");
+stagingSection.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&draggedRow.area==="day"){e.preventDefault();stagingSection.classList.add("drop-target");}});
+stagingSection.addEventListener("dragleave",e=>{if(!stagingSection.contains(e.relatedTarget))stagingSection.classList.remove("drop-target");});
+stagingSection.addEventListener("drop",e=>{e.preventDefault();stagingSection.classList.remove("drop-target");if(!draggedRow||draggedRow.type!=="row"||draggedRow.area!=="day")return;const row=getRow("day",draggedRow.id);if(row)moveRowToStaging(row);});
 document.getElementById("exportJsonButton").addEventListener("click",exportJSON);
-document.getElementById("exportCsvButton").addEventListener("click",exportCSV);
 document.getElementById("importJsonButton").addEventListener("click",()=>document.getElementById("importFile").click());
 document.getElementById("importFile").addEventListener("change",e=>{if(e.target.files[0])importJSON(e.target.files[0]);e.target.value="";});
 document.getElementById("exportImageButton").addEventListener("click",()=>openExportDialog("image"));
