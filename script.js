@@ -122,8 +122,8 @@ function cascadeFrom(index){
  for(let i=Math.min(index,rows.length-1);i>0;i--){const current=rows[i],previous=rows[i-1];if(current.pending||previous.pending)break;if(!current.start)continue;
   if(previous.lock==="end"&&previous.end!==current.start){lockedConflictId=previous.id;return conflictMessage(previous,"end");}
   previous.end=current.start;
-  if(previous.lock==="duration")previous.start=minToTime(timeToMin(previous.end)-Number(previous.duration||60));
-  else if(previous.start)previous.duration=durationBetween(previous.start,previous.end);
+  if(previous.lock==="duration"||!previous.start)previous.start=minToTime(timeToMin(previous.end)-Number(previous.duration||60));
+  else previous.duration=durationBetween(previous.start,previous.end);
  }
  for(let i=Math.max(0,index);i<rows.length;i++){const current=rows[i];if(current.pending)break;
   if(i===0){if(current.start&&current.duration)current.end=minToTime(timeToMin(current.start)+Number(current.duration));continue;}
