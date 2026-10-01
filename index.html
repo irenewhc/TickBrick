@@ -44,7 +44,7 @@
       <div class="section-heading"><div><h2 id="activeDateTitle"></h2><p id="daySummary"></p></div><button id="deleteDateButton" class="button danger-outline" type="button">刪除此日期</button></div>
       <div class="table-wrap">
         <table id="itineraryTable">
-          <thead><tr><th class="order-col">排序</th><th class="time-col">時間／時長</th><th class="category-col">類別</th><th>行程內容</th><th class="move-col">移動</th><th class="delete-col">刪除</th></tr></thead>
+          <thead><tr><th class="order-col">排序</th><th class="start-col">開始時間</th><th class="end-col">結束時間</th><th class="duration-col">總時長</th><th class="category-col">類別</th><th>行程內容</th><th class="move-col">移動</th><th class="delete-col">刪除</th></tr></thead>
           <tbody id="tableBody"></tbody>
         </table>
         <div id="emptyDay" class="empty-state" hidden>這一天目前沒有行程。你可以新增行程，或將暫存項目放到這一天。</div>
@@ -53,7 +53,7 @@
 
     <section id="stagingSection" class="staging-section">
       <div class="section-heading"><div><h2>共用暫存區</h2><p>暫存項目不屬於任何日期；放置到行程後才會加入時間連動。</p></div><span id="stagingCount" class="count-badge"></span></div>
-      <div class="table-wrap"><table><thead><tr><th class="order-col">排序</th><th class="time-col">時間／時長</th><th class="category-col">類別</th><th>行程內容</th><th class="move-col">移動</th><th class="delete-col">刪除</th></tr></thead><tbody id="stagingBody"></tbody></table><div id="emptyStaging" class="empty-state" hidden>暫存區目前是空的。</div></div>
+      <div class="table-wrap"><table><thead><tr><th class="order-col">排序</th><th class="start-col">開始時間</th><th class="end-col">結束時間</th><th class="duration-col">總時長</th><th class="category-col">類別</th><th>行程內容</th><th class="move-col">移動</th><th class="delete-col">刪除</th></tr></thead><tbody id="stagingBody"></tbody></table><div id="emptyStaging" class="empty-state" hidden>暫存區目前是空的。</div></div>
     </section>
 
     <section class="category-settings"><details><summary>類別顏色</summary><div id="categoryColors" class="category-color-list"></div></details></section>

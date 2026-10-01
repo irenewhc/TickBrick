@@ -11,6 +11,7 @@ const INITIAL_ROWS = [
 let state=loadState();
 let activeCalendarMonth=state.activeDate?new Date(state.activeDate+"T12:00:00"):new Date(2026,9,1);
 let draggedRow=null, autosaveTimer, calendarCreateMode=false;
+let modifiedRowId=null, modifiedField=null, lockedConflictId=null;
 
 function blankState(){return{version:1,dates:[],activeDate:"",days:{},staging:[],categories:DEFAULT_CATEGORIES.map(x=>({...x}))};}
 function makeId(){return"r"+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
@@ -65,9 +66,15 @@ function renderStaging(){
 function categoryOptions(value){return'<option value="">未分類</option>'+state.categories.map(c=>'<option value="'+esc(c.name)+'" '+(value===c.name?"selected":"")+'>'+esc(c.name)+'</option>').join("");}
 function rowMarkup(row,index,area){
  const color=(state.categories.find(c=>c.name===row.category)||{}).color||"#FFFFFF",pending=!!row.pending;
- return'<tr class="schedule-row '+(pending?"pending-row":"")+'" draggable="true" data-id="'+esc(row.id)+'" data-index="'+index+'" data-area="'+area+'">'+
+ const rowClass=["schedule-row",pending?"pending-row":"",area==="day"&&row.isNew?"new-row-highlight":"",lockedConflictId===row.id?"conflict-highlight":""].filter(Boolean).join(" ");
+ const inputClass=field=>modifiedRowId===row.id&&modifiedField===field?" conflict-field-highlight":"";
+ const lockButton=field=>'<button class="lock-btn '+(row.lock===field?"locked":"")+'" data-lock="'+field+'" title="鎖定'+({start:"開始時間",end:"結束時間",duration:"總時長"}[field])+'">'+(row.lock===field?"🔒":"🔓")+'</button>';
+ const editDisabled=area==="staging"||pending;
+ return'<tr class="'+rowClass+'" draggable="true" data-id="'+esc(row.id)+'" data-index="'+index+'" data-area="'+area+'">'+
  '<td class="order-cell"><span class="drag-handle" title="拖曳調整順序">⠿</span>'+(pending?'<span class="pending-tag">待放置</span>':"")+'</td>'+
- '<td class="time-editor"><div class="time-inputs"><input type="text" aria-label="開始時間" value="'+esc(row.start)+'" placeholder="開始" '+(pending||area==="staging"||row.lock==="start"?"disabled":"")+' data-field="start"><span>–</span><input type="text" aria-label="結束時間" value="'+esc(row.end)+'" placeholder="結束" '+(pending||area==="staging"||row.lock==="end"?"disabled":"")+' data-field="end"></div><div class="duration-input"><input type="number" min="1" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"> 分鐘</div>'+(area==="staging"?"":'<div class="lock-controls"><button type="button" data-lock="start" title="鎖定開始時間">'+(row.lock==="start"?"🔒開始":"🔓開始")+'</button><button type="button" data-lock="end" title="鎖定結束時間">'+(row.lock==="end"?"🔒結束":"🔓結束")+'</button><button type="button" data-lock="duration" title="鎖定總時長">'+(row.lock==="duration"?"🔒時長":"🔓時長")+'</button></div>')+'</td>'+
+ '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("start")+'" aria-label="開始時間" value="'+esc(row.start)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="start"?"disabled":"")+' data-field="start">'+(area==="day"?lockButton("start"):"")+'</div></td>'+
+ '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("end")+'" aria-label="結束時間" value="'+esc(row.end)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="end"?"disabled":"")+' data-field="end">'+(area==="day"?lockButton("end"):"")+'</div></td>'+
+ '<td><div class="duration-cell"><input type="number" class="duration-input'+inputClass("duration")+'" min="1" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"><span>分鐘</span>'+(area==="day"?lockButton("duration"):"")+'</div></td>'+
  '<td><select class="category-select" aria-label="類別" style="background-color:'+color+'" data-field="category">'+categoryOptions(row.category)+'</select></td>'+
  '<td><input class="content-input" type="text" aria-label="行程內容" value="'+esc(row.content)+'" placeholder="輸入行程內容" data-field="content"></td>'+
  '<td class="row-actions">'+(area==="day"?(pending?'<button class="button small primary" data-action="place">放置此處</button><button class="button small secondary" data-action="stage">移至暫存</button>':'<button class="button small secondary" data-action="move">移至日期</button><button class="button small secondary" data-action="stage">移至暫存</button>'):'<button class="button small secondary" data-action="move">移至日期</button>')+'</td>'+
@@ -75,6 +82,7 @@ function rowMarkup(row,index,area){
 }
 function bindRows(root,area){
  root.querySelectorAll("tr[data-id]").forEach(tr=>{const row=getRow(area,tr.dataset.id);
+  tr.addEventListener("focusin",()=>{if(row.isNew){row.isNew=false;tr.classList.remove("new-row-highlight");persist();}});
   tr.addEventListener("dragstart",e=>{if(e.target.closest("input,select,button")){e.preventDefault();return;}draggedRow={type:"row",area,id:row.id};e.dataTransfer.effectAllowed="move";});
   tr.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&draggedRow.area===area){e.preventDefault();tr.classList.add("drag-over");}});
   tr.addEventListener("dragleave",()=>tr.classList.remove("drag-over"));
@@ -103,14 +111,15 @@ function updateRow(area,id,field,value){
 }
 function reorderRow(area,fromId,toId){
  if(!fromId||fromId===toId)return;const list=getList(area),from=list.findIndex(r=>r.id===fromId),to=list.findIndex(r=>r.id===toId);if(from<0||to<0)return;
+ modifiedRowId=null;modifiedField=null;lockedConflictId=null;
  const backup=structuredClone(list),row=list.splice(from,1)[0];list.splice(to,0,row);
- if(area==="day"){const error=cascadeFrom(Math.min(from,to));if(error){state.days[state.activeDate]=backup;showToast(error);}}
- draggedRow=null;persist();render();
+ if(area==="day"){const error=cascadeFrom(Math.min(from,to));if(error){state.days[state.activeDate]=backup;modifiedRowId=fromId;draggedRow=null;persist();render();openConflictModal(error);return;}}
+ draggedRow=null;persist();render();if(area==="day")showToast("排序已更新，時間自動串聯完成");
 }
 function cascadeFrom(index){
- const rows=activeRows();
+ const rows=activeRows();lockedConflictId=null;
  for(let i=Math.min(index,rows.length-1);i>0;i--){const current=rows[i],previous=rows[i-1];if(current.pending||previous.pending)break;if(!current.start)continue;
-  if(previous.lock==="end"&&previous.end!==current.start)return"時間連動會影響已鎖定的結束時間，已保留原安排。";
+  if(previous.lock==="end"&&previous.end!==current.start){lockedConflictId=previous.id;return conflictMessage(previous,"end");}
   previous.end=current.start;
   if(previous.lock==="duration")previous.start=minToTime(timeToMin(previous.end)-Number(previous.duration||60));
   else if(previous.start)previous.duration=durationBetween(previous.start,previous.end);
@@ -119,62 +128,76 @@ function cascadeFrom(index){
   if(i===0){if(current.start&&current.duration)current.end=minToTime(timeToMin(current.start)+Number(current.duration));continue;}
   const previous=rows[i-1];if(previous.pending||!previous.end)break;
   const targetEnd=minToTime(timeToMin(previous.end)+Number(current.duration||60));
-  if(current.lock==="start"&&current.start!==previous.end)return"時間連動會影響已鎖定的開始時間，已保留原安排。";
-  if(current.lock==="end"&&current.end!==targetEnd)return"時間連動會影響已鎖定的結束時間，已保留原安排。";
+  if(current.lock==="start"&&current.start!==previous.end){lockedConflictId=current.id;return conflictMessage(current,"start");}
+  if(current.lock==="end"&&current.end!==targetEnd){lockedConflictId=current.id;return conflictMessage(current,"end");}
   current.start=previous.end;if(current.lock==="end")current.duration=durationBetween(current.start,current.end);else current.end=targetEnd;
  }return"";
 }
+function conflictMessage(row,field){const item=row.content?"「"+row.content+"」":"行程項目",name={start:"開始時間",end:"結束時間",duration:"總時長"}[field];return item+" 的「"+name+"」已經被鎖定，無法被連動覆蓋，請重新確認。";}
 function formatTime(value){let str=String(value||"").replace(/[^\d:]/g,"");if(!str)return"";let parts=str.includes(":")?str.split(":"):(str.length>2?[str.slice(0,-2),str.slice(-2)]:[str,"0"]);const h=Math.min(23,Math.max(0,Number(parts[0])||0)),m=Math.min(59,Math.max(0,Number(parts[1])||0));return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");}
 function timeToMin(value){const p=String(value||"00:00").split(":");return Number(p[0])*60+Number(p[1]);}
 function minToTime(value){const m=((Math.round(value)%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");}
 function durationBetween(start,end){let d=timeToMin(end)-timeToMin(start);if(d<0)d+=1440;return d||1;}
 function handleTimeEdit(id,field,value){
+ modifiedRowId=null;modifiedField=null;lockedConflictId=null;
  const row=getRow("day",id);if(!row)return;if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");renderDay();return;}
  const parsed=field==="duration"?Math.max(1,Number(value)||1):formatTime(value),rows=activeRows(),index=rows.indexOf(row),backup=structuredClone(rows);
  if(row.lock&&row.lock!=="none"){
   row[field]=parsed;
-  if(row.lock==="start"){if(field==="end")row.duration=durationBetween(row.start,row.end);else if(field==="duration")row.end=minToTime(timeToMin(row.start)+Number(row.duration));}
-  else if(row.lock==="end"){if(field==="start")row.duration=durationBetween(row.start,row.end);else if(field==="duration")row.start=minToTime(timeToMin(row.end)-Number(row.duration));}
-  else if(row.lock==="duration"){if(field==="start")row.end=minToTime(timeToMin(row.start)+Number(row.duration));else if(field==="end")row.start=minToTime(timeToMin(row.end)-Number(row.duration));}
-  return finishTimeEdit(row,index,backup);
+  let calculatedField="";
+  if(row.lock==="start"){if(field==="end"){row.duration=durationBetween(row.start,row.end);calculatedField="總時長";}else if(field==="duration"){row.end=minToTime(timeToMin(row.start)+Number(row.duration));calculatedField="結束時間";}}
+  else if(row.lock==="end"){if(field==="start"){row.duration=durationBetween(row.start,row.end);calculatedField="總時長";}else if(field==="duration"){row.start=minToTime(timeToMin(row.end)-Number(row.duration));calculatedField="開始時間";}}
+  else if(row.lock==="duration"){if(field==="start"){row.end=minToTime(timeToMin(row.start)+Number(row.duration));calculatedField="結束時間";}else if(field==="end"){row.start=minToTime(timeToMin(row.end)-Number(row.duration));calculatedField="開始時間";}}
+  return finishTimeEdit(row,index,backup,field,calculatedField);
  }
  if(!row.start&&!row.end){row[field]=parsed;if(field==="start"&&row.start)row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));if(field==="end"&&row.end)row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));persist();render();return;}
- if(field==="start"&&!row.end){row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));return finishTimeEdit(row,index,backup);}
- if(field==="end"&&!row.start){row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));return finishTimeEdit(row,index,backup);}
+ if(field==="start"&&!row.end){row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"結束時間");}
+ if(field==="end"&&!row.start){row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"開始時間");}
  const question=field==="start"?"開始時間已修改，請選擇要固定的欄位。":field==="end"?"結束時間已修改，請選擇要固定的欄位。":"總時長已修改，請選擇要固定的欄位。";
  const options=field==="start"?[
-  {text:"總時長不變，推算結束時間",cls:"primary",apply:()=>{row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));}},
-  {text:"結束時間不變，推算總時長",cls:"secondary",apply:()=>{row.start=parsed;row.duration=durationBetween(row.start,row.end);}}
+  {text:"總時長不變，推算結束時間",calculated:"結束時間",cls:"primary",apply:()=>{row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));}},
+  {text:"結束時間不變，推算總時長",calculated:"總時長",cls:"secondary",apply:()=>{row.start=parsed;row.duration=durationBetween(row.start,row.end);}}
  ]:field==="end"?[
-  {text:"總時長不變，推算開始時間",cls:"primary",apply:()=>{row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));}},
-  {text:"開始時間不變，推算總時長",cls:"secondary",apply:()=>{row.end=parsed;row.duration=durationBetween(row.start,row.end);}}
+  {text:"總時長不變，推算開始時間",calculated:"開始時間",cls:"primary",apply:()=>{row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));}},
+  {text:"開始時間不變，推算總時長",calculated:"總時長",cls:"secondary",apply:()=>{row.end=parsed;row.duration=durationBetween(row.start,row.end);}}
  ]:[
-  {text:"開始時間不變，推算結束時間",cls:"primary",apply:()=>{row.duration=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration));}},
-  {text:"結束時間不變，推算開始時間",cls:"secondary",apply:()=>{row.duration=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration));}}
+  {text:"開始時間不變，推算結束時間",calculated:"結束時間",cls:"primary",apply:()=>{row.duration=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration));}},
+  {text:"結束時間不變，推算開始時間",calculated:"開始時間",cls:"secondary",apply:()=>{row.duration=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration));}}
  ];
- openDialog(question,question,options.map(option=>({text:option.text,cls:option.cls,run:()=>{option.apply();finishTimeEdit(row,index,backup);}})).concat([{text:"取消",cls:"secondary",run:()=>renderDay()}]));
+ openDialog(question,question,options.map(option=>({text:option.text,cls:option.cls,run:()=>{option.apply();finishTimeEdit(row,index,backup,field,option.calculated);}})).concat([{text:"取消",cls:"secondary",run:()=>renderDay()}]));
 }
-function finishTimeEdit(row,index,backup){const error=cascadeFrom(index);if(error){state.days[state.activeDate]=backup;showToast(error);}else persist();render();}
+function finishTimeEdit(row,index,backup,field,calculatedField){modifiedRowId=row.id;modifiedField=field;const error=cascadeFrom(index);if(error){state.days[state.activeDate]=backup;}else{modifiedRowId=null;modifiedField=null;persist();}render();if(error)openConflictModal(error);else if(calculatedField)showToast(calculatedField+"已修正");}
 
 /* 行程操作：新增、刪除、跨日期待放置與移入暫存。 */
 function addRow(){
  const rows=activeRows(),backup=structuredClone(activeRows()),first=rows.find(r=>!r.pending);let start="",end="";
  if(first&&first.start){end=first.start;start=minToTime(timeToMin(end)-60);}
- rows.unshift(makeRow(state.activeDate,start,end,60,"",""));if(start){const error=cascadeFrom(0);if(error){state.days[state.activeDate]=backup;showToast(error);render();return;}}persist();render();showToast("已新增行程");
+ const newRow=makeRow(state.activeDate,start,end,60,"","");newRow.isNew=true;rows.unshift(newRow);if(start){const error=cascadeFrom(0);if(error){state.days[state.activeDate]=backup;modifiedRowId=newRow.id;modifiedField=null;render();openConflictModal(error);return;}}persist();render();showToast("已新增行程");
 }
 function rowAction(area,id,action){
  const row=getRow(area,id);if(!row)return;
- if(action==="delete")return askConfirm("刪除此行程","確定要刪除「"+(row.content||"未命名行程")+"」嗎？","刪除",()=>{const list=getList(area),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;list.splice(index,1);if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.days[state.activeDate]=backup;showToast(error);render();return;}}persist();render();});
- if(action==="stage"){const list=getList(area),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;list.splice(index,1);row.start="";row.end="";row.date="";row.pending=false;row.lock="none";state.staging.push(row);if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.staging.pop();state.days[state.activeDate]=backup;showToast(error);render();return;}}persist();render();}
+ if(action==="delete")return confirmDeleteRow(area,row);
+ if(action==="stage"){const list=getList(area),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;list.splice(index,1);row.start="";row.end="";row.date="";row.pending=false;row.lock="none";row.isNew=false;state.staging.push(row);if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.staging.pop();state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}}persist();render();}
  if(action==="place")placePending(row);
  if(action==="move")chooseDate(target=>moveToDate(area,row,target));
+}
+function confirmDeleteRow(area,row){
+ const detail=document.createElement("div"),intro=document.createElement("p"),item=document.createElement("div");
+ intro.textContent="您確定要刪除以下行程嗎？";item.className="delete-confirm-item";item.textContent=(row.start||"—")+" ~ "+(row.end||"—")+" : "+(row.content||"(無內容)");detail.append(intro,item);
+ openDialog("確認刪除行程",detail,[{text:"刪除",cls:"danger",run:()=>{const list=getList(area),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;list.splice(index,1);if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}}persist();render();showToast("行程已刪除，時間自動串聯完成");}},{text:"取消",cls:"secondary"}]);
+}
+function openConflictModal(message){
+ const content=document.createElement("div"),messageLine=document.createElement("p"),hint=document.createElement("p");
+ messageLine.className="conflict-message";messageLine.textContent=message;
+ hint.className="conflict-hint";hint.textContent="系統已復原至修改前的狀態。黃色欄位是剛剛修改的欄位；紅框列是發生鎖定衝突的行程。";
+ content.append(messageLine,hint);openDialog("⚠️ 行程時間衝突警告",content,[{text:"我知道了",cls:"danger",run:()=>{modifiedRowId=null;modifiedField=null;lockedConflictId=null;render();}}]);
 }
 function moveToDate(area,row,targetDate){
  if(!validDate(targetDate))return;
  if(!state.dates.includes(targetDate)){state.dates.push(targetDate);state.days[targetDate]=[];}
  const list=area==="staging"?state.staging:activeRows(),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;if(index>=0)list.splice(index,1);
- if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.days[state.activeDate]=backup;showToast(error);render();return;}}
- row.date=targetDate;row.pending=true;row.lock="none";state.days[targetDate].push(row);state.activeDate=targetDate;activeCalendarMonth=new Date(targetDate+"T12:00:00");persist();render();showToast("行程已移至 "+dateLabel(targetDate)+"，確認位置後按「放置此處」");
+ if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}}
+ row.date=targetDate;row.pending=true;row.lock="none";row.isNew=false;state.days[targetDate].push(row);state.activeDate=targetDate;activeCalendarMonth=new Date(targetDate+"T12:00:00");persist();render();showToast("行程已移至 "+dateLabel(targetDate)+"，確認位置後按「放置此處」");
 }
 function placePending(row){
  const rows=activeRows(),index=rows.indexOf(row);if(index<0)return;const before=structuredClone(rows);
@@ -182,7 +205,7 @@ function placePending(row){
  if(previous){row.start=previous.end;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));}
  else if(next){row.end=next.start;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));}
  else{row.start="";row.end="";}
- const error=cascadeFrom(index);if(error){state.days[state.activeDate]=before;showToast(error);render();return;}
+ const error=cascadeFrom(index);if(error){state.days[state.activeDate]=before;modifiedRowId=row.id;modifiedField=null;render();openConflictModal(error);return;}
  persist();render();showToast("行程已放置並加入時間連動");
 }
 
