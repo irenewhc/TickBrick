@@ -9,7 +9,7 @@ const INITIAL_ROWS = [
  ["18:00","19:00",60,"用餐","大通公園周邊湯咖哩"],["19:00","21:00",120,"逛街","東急百貨店(va、JOUETE)、BIC CAMERA"]
 ];
 let state=loadState();
-let activeCalendarMonth=state.activeDate?new Date(state.activeDate+"T12:00:00"):new Date(2026,9,1);
+let activeCalendarMonth=state.activeDate?calendarMonthFor(state.activeDate):new Date(2026,9,1);
 let draggedRow=null, autosaveTimer, calendarCreateMode=false;
 let modifiedRowId=null, modifiedField=null, lockedConflictId=null;
 
@@ -35,6 +35,7 @@ function normalizeState(input){
  DEFAULT_CATEGORIES.forEach(def=>{if(!result.categories.some(c=>c.name===def.name))result.categories.push({...def});});return result;
 }
 function validDate(value){return/^\d{4}-\d{2}-\d{2}$/.test(value)&&!isNaN(new Date(value+"T12:00:00").getTime());}
+function calendarMonthFor(value){const date=value?new Date(value+"T12:00:00"):new Date();return new Date(date.getFullYear(),date.getMonth(),1);}
 function saveState(data){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data||state));}catch(error){console.error("自動保存失敗",error);showToast("瀏覽器儲存空間不足，請先匯出 JSON 備份");}}
 function persist(){clearTimeout(autosaveTimer);autosaveTimer=setTimeout(()=>saveState(),120);}
 function esc(value){return String(value==null?"":value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
@@ -47,11 +48,12 @@ function render(){renderTabs();renderDay();renderStaging();renderCategories();re
 function renderTabs(){
  const root=document.getElementById("dateTabs");root.innerHTML="";
  state.dates.forEach((date,index)=>{const tab=document.createElement("div");tab.className="date-tab"+(date===state.activeDate?" active":"");tab.draggable=true;tab.dataset.date=date;
-  const select=document.createElement("button");select.type="button";select.className="date-tab-select";select.textContent=dateLabel(date);select.setAttribute("role","tab");select.setAttribute("aria-selected",date===state.activeDate?"true":"false");select.addEventListener("click",()=>{state.activeDate=date;activeCalendarMonth=new Date(date+"T12:00:00");persist();render();});
+  const select=document.createElement("button");select.type="button";select.className="date-tab-select";select.textContent=dateLabel(date);select.setAttribute("role","tab");select.setAttribute("aria-selected",date===state.activeDate?"true":"false");select.addEventListener("click",()=>{state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();});
   const close=document.createElement("button");close.type="button";close.className="date-tab-close";close.textContent="×";close.setAttribute("aria-label","刪除 "+dateLabel(date,true));close.draggable=false;close.addEventListener("click",e=>{e.stopPropagation();deleteDate(date);});tab.append(select,close);
-  tab.addEventListener("dragstart",e=>{if(e.target.closest(".date-tab-close")){e.preventDefault();return;}draggedRow={type:"tab",index};e.dataTransfer.effectAllowed="move";});
-  tab.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="tab")e.preventDefault();});
-  tab.addEventListener("drop",e=>{e.preventDefault();if(!draggedRow||draggedRow.type!=="tab")return;const from=draggedRow.index,item=state.dates.splice(from,1)[0];state.dates.splice(index,0,item);draggedRow=null;persist();renderTabs();});root.appendChild(tab);
+  tab.addEventListener("dragstart",e=>{if(e.target.closest(".date-tab-close")){e.preventDefault();return;}draggedRow={type:"tab",index,dropIndex:index};root.classList.add("is-dragging");tab.classList.add("tab-dragging");e.dataTransfer.effectAllowed="move";});
+  tab.addEventListener("dragover",e=>{if(!draggedRow||draggedRow.type!=="tab")return;e.preventDefault();root.querySelectorAll(".tab-drop-before,.tab-drop-after").forEach(item=>item.classList.remove("tab-drop-before","tab-drop-after"));const before=e.clientX<tab.getBoundingClientRect().left+tab.offsetWidth/2;tab.classList.add(before?"tab-drop-before":"tab-drop-after");draggedRow.dropIndex=index+(before?0:1);});
+  tab.addEventListener("drop",e=>{e.preventDefault();if(!draggedRow||draggedRow.type!=="tab")return;const from=draggedRow.index,to=draggedRow.dropIndex>from?draggedRow.dropIndex-1:draggedRow.dropIndex,item=state.dates.splice(from,1)[0];state.dates.splice(to,0,item);draggedRow=null;root.classList.remove("is-dragging");persist();renderTabs();});
+  tab.addEventListener("dragend",()=>{draggedRow=null;root.classList.remove("is-dragging");root.querySelectorAll(".tab-dragging,.tab-drop-before,.tab-drop-after").forEach(item=>item.classList.remove("tab-dragging","tab-drop-before","tab-drop-after"));});root.appendChild(tab);
  });
 }
 function renderDay(){
@@ -71,8 +73,8 @@ function rowMarkup(row,index,area){
  const inputClass=field=>modifiedRowId===row.id&&modifiedField===field?" conflict-field-highlight":"";
  const lockButton=field=>'<button class="lock-btn '+(row.lock===field?"locked":"")+'" data-lock="'+field+'" title="鎖定'+({start:"開始時間",end:"結束時間",duration:"總時長"}[field])+'">'+(row.lock===field?"🔒":"🔓")+'</button>';
  const editDisabled=area==="staging"||pending;
- return'<tr class="'+rowClass+'" draggable="true" data-id="'+esc(row.id)+'" data-index="'+index+'" data-area="'+area+'">'+
- '<td class="order-cell"><span class="drag-handle" title="拖曳調整順序">⠿</span>'+(pending?'<span class="pending-tag">待放置</span>':"")+'</td>'+
+ return'<tr class="'+rowClass+'" data-id="'+esc(row.id)+'" data-index="'+index+'" data-area="'+area+'">'+
+ '<td class="order-cell" draggable="true"><span class="drag-handle" title="拖曳調整順序">⠿</span>'+(pending?'<span class="pending-tag">待放置</span>':"")+'</td>'+
  '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("start")+'" aria-label="開始時間" value="'+esc(row.start)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="start"?"disabled":"")+' data-field="start">'+(area==="day"?lockButton("start"):"")+'</div></td>'+
  '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("end")+'" aria-label="結束時間" value="'+esc(row.end)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="end"?"disabled":"")+' data-field="end">'+(area==="day"?lockButton("end"):"")+'</div></td>'+
  '<td><div class="duration-cell"><div class="duration-editor"><input type="number" class="duration-input'+inputClass("duration")+'" min="1" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"><span>分鐘</span>'+(area==="day"?lockButton("duration"):"")+'</div><span class="duration-display">'+formatDuration(row.duration)+'</span></div></td>'+
@@ -84,7 +86,8 @@ function rowMarkup(row,index,area){
 function bindRows(root,area){
  root.querySelectorAll("tr[data-id]").forEach(tr=>{const row=getRow(area,tr.dataset.id);
   tr.addEventListener("focusin",()=>{if(row.isNew){row.isNew=false;tr.classList.remove("new-row-highlight");persist();}});
-  tr.addEventListener("dragstart",e=>{if(e.target.closest("input,select,button")){e.preventDefault();return;}draggedRow={type:"row",area,id:row.id};e.dataTransfer.effectAllowed="move";});
+  tr.addEventListener("dragstart",e=>{if(!e.target.closest(".order-cell")){e.preventDefault();return;}draggedRow={type:"row",area,id:row.id};e.dataTransfer.effectAllowed="move";const rect=tr.getBoundingClientRect();e.dataTransfer.setDragImage(tr,e.clientX-rect.left,e.clientY-rect.top);tr.classList.add("row-dragging");});
+  tr.addEventListener("dragend",()=>tr.classList.remove("row-dragging"));
   tr.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"))){e.preventDefault();tr.classList.add("drag-over");}});
   tr.addEventListener("dragleave",()=>tr.classList.remove("drag-over"));
   tr.addEventListener("drop",e=>{e.preventDefault();tr.classList.remove("drag-over");if(area==="day"&&draggedRow&&draggedRow.type==="row"&&draggedRow.area==="staging"){const stagingRow=getRow("staging",draggedRow.id);if(stagingRow)moveStagingRowToDay(stagingRow,row.id);return;}reorderRow(area,draggedRow&&draggedRow.id,row.id);});
@@ -212,7 +215,7 @@ function moveToDate(area,row,targetDate){
  if(!state.dates.includes(targetDate)){state.dates.push(targetDate);state.days[targetDate]=[];}
  const list=area==="staging"?state.staging:activeRows(),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;if(index>=0)list.splice(index,1);
  if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}}
- row.date=targetDate;row.pending=true;row.lock="none";row.isNew=false;state.days[targetDate].push(row);state.activeDate=targetDate;activeCalendarMonth=new Date(targetDate+"T12:00:00");persist();render();showToast("行程已移至 "+dateLabel(targetDate)+"，確認位置後按「放置此處」");
+ row.date=targetDate;row.pending=true;row.lock="none";row.isNew=false;state.days[targetDate].push(row);state.activeDate=targetDate;activeCalendarMonth=calendarMonthFor(targetDate);persist();render();showToast("行程已移至 "+dateLabel(targetDate)+"，確認位置後按「放置此處」");
 }
 function placePending(row){
  const rows=activeRows(),index=rows.indexOf(row);if(index<0)return;const before=structuredClone(rows);
@@ -231,27 +234,27 @@ function renderCalendar(){
  const year=activeCalendarMonth.getFullYear(),month=activeCalendarMonth.getMonth();title.textContent=year+" 年 "+(month+1)+" 月";grid.innerHTML="";
  ["日","一","二","三","四","五","六"].forEach(d=>{const el=document.createElement("span");el.className="weekday";el.textContent=d;grid.appendChild(el);});
  const first=new Date(year,month,1).getDay(),total=new Date(year,month+1,0).getDate();for(let i=0;i<first;i++)grid.appendChild(document.createElement("span"));
- for(let day=1;day<=total;day++){const date=year+"-"+String(month+1).padStart(2,"0")+"-"+String(day).padStart(2,"0"),btn=document.createElement("button");btn.type="button";btn.className="calendar-day "+(state.dates.includes(date)?"has-date":"no-date")+(date===state.activeDate?" selected":"");btn.textContent=day;btn.title=state.dates.includes(date)?"已有日期頁籤":"尚未建立日期";btn.disabled=!calendarCreateMode&&!state.dates.includes(date);btn.addEventListener("click",()=>{if(state.dates.includes(date)){state.activeDate=date;persist();render();document.getElementById("calendarPopover").hidden=true;}else if(calendarCreateMode)openDateAction(date);});grid.appendChild(btn);}
+ for(let day=1;day<=total;day++){const date=year+"-"+String(month+1).padStart(2,"0")+"-"+String(day).padStart(2,"0"),btn=document.createElement("button");btn.type="button";btn.className="calendar-day "+(state.dates.includes(date)?"has-date":"no-date")+(date===state.activeDate?" selected":"");btn.textContent=day;btn.title=state.dates.includes(date)?"已有日期頁籤":"尚未建立日期";btn.disabled=!calendarCreateMode&&!state.dates.includes(date);btn.addEventListener("click",()=>{if(state.dates.includes(date)){state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();document.getElementById("calendarPopover").hidden=true;}else if(calendarCreateMode)openDateAction(date);});grid.appendChild(btn);}
 }
-function openDateAction(date){openDialog("建立日期頁籤？",dateLabel(date,true)+" 尚未建立行程頁籤。",[{text:"建立並前往",cls:"primary",run:()=>{state.dates.push(date);state.days[date]=[];state.activeDate=date;activeCalendarMonth=new Date(date+"T12:00:00");persist();render();document.getElementById("calendarPopover").hidden=true;}},{text:"取消",cls:"secondary"}]);}
+function openDateAction(date){openDialog("建立日期頁籤？",dateLabel(date,true)+" 尚未建立行程頁籤。",[{text:"建立並前往",cls:"primary",run:()=>{state.dates.push(date);state.days[date]=[];state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();document.getElementById("calendarPopover").hidden=true;}},{text:"取消",cls:"secondary"}]);}
 function chooseDate(callback){
- let month=state.activeDate?new Date(state.activeDate+"T12:00:00"):new Date(),selected=state.activeDate||"";
+ let month=calendarMonthFor(state.activeDate),selected=state.activeDate||"";
  const content=document.createElement("div");content.className="date-choice";const hint=document.createElement("p");hint.textContent="選擇已有日期，或選擇尚未建立的日期；新日期會自動建立頁籤。";
  const heading=document.createElement("div");heading.className="calendar-heading";const prev=document.createElement("button");prev.type="button";prev.textContent="‹";const title=document.createElement("strong");const next=document.createElement("button");next.type="button";next.textContent="›";heading.append(prev,title,next);
  const grid=document.createElement("div");grid.className="calendar-grid move-calendar-grid";const legend=document.createElement("div");legend.className="calendar-legend";legend.innerHTML='<span><i class="legend-has"></i>已有日期頁籤</span><span><i class="legend-none"></i>尚未建立</span>';
  const selection=document.createElement("p");selection.className="calendar-selection";
  function draw(){const year=month.getFullYear(),monthIndex=month.getMonth();title.textContent=year+" 年 "+(monthIndex+1)+" 月";grid.innerHTML="";["日","一","二","三","四","五","六"].forEach(d=>{const day=document.createElement("span");day.className="weekday";day.textContent=d;grid.appendChild(day);});const first=new Date(year,monthIndex,1).getDay(),total=new Date(year,monthIndex+1,0).getDate();for(let i=0;i<first;i++)grid.appendChild(document.createElement("span"));for(let day=1;day<=total;day++){const date=year+"-"+String(monthIndex+1).padStart(2,"0")+"-"+String(day).padStart(2,"0"),button=document.createElement("button");button.type="button";button.className="calendar-day "+(state.dates.includes(date)?"has-date":"no-date")+(selected===date?" selected":"");button.textContent=day;button.addEventListener("click",()=>{selected=date;selection.textContent="選取日期："+dateLabel(date,true);draw();});grid.appendChild(button);}selection.textContent=selected?"選取日期："+dateLabel(selected,true):"請選擇日期";}
- prev.addEventListener("click",()=>{month.setMonth(month.getMonth()-1);draw();});next.addEventListener("click",()=>{month.setMonth(month.getMonth()+1);draw();});draw();content.append(hint,heading,grid,legend,selection);
+ prev.addEventListener("click",()=>{month=new Date(month.getFullYear(),month.getMonth()-1,1);draw();});next.addEventListener("click",()=>{month=new Date(month.getFullYear(),month.getMonth()+1,1);draw();});draw();content.append(hint,heading,grid,legend,selection);
  openDialog("移至日期",content,[{text:"移至所選日期",cls:"primary",run:()=>callback(selected)},{text:"取消",cls:"secondary"}]);
 }
-function deleteDate(date=state.activeDate){if(!date)return;askConfirm("刪除日期頁籤","刪除 "+dateLabel(date,true)+" 與這一天的所有行程嗎？此操作無法復原。","刪除此日期",()=>{const idx=state.dates.indexOf(date);state.dates.splice(idx,1);delete state.days[date];if(state.activeDate===date)state.activeDate=state.dates[Math.min(idx,state.dates.length-1)]||"";if(state.activeDate)activeCalendarMonth=new Date(state.activeDate+"T12:00:00");persist();render();});}
+function deleteDate(date=state.activeDate){if(!date)return;askConfirm("刪除日期頁籤","刪除 "+dateLabel(date,true)+" 與這一天的所有行程嗎？此操作無法復原。","刪除此日期",()=>{const idx=state.dates.indexOf(date);state.dates.splice(idx,1);delete state.days[date];if(state.activeDate===date)state.activeDate=state.dates[Math.min(idx,state.dates.length-1)]||"";if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();});}
 
 /* 現有類別顏色可以自訂，並納入自動保存及備份。 */
 function renderCategories(){const root=document.getElementById("categoryColors");root.innerHTML="";state.categories.forEach(category=>{const label=document.createElement("label");label.className="category-color";const name=document.createElement("span");name.textContent=category.name;const input=document.createElement("input");input.type="color";input.value=category.color;input.setAttribute("aria-label",category.name+" 顏色");input.addEventListener("input",()=>{category.color=input.value;persist();renderDay();renderStaging();});label.append(name,input);root.appendChild(label);});}
 
 /* JSON 匯入匯出保存完整日期、排序、暫存與類別顏色。 */
 function exportJSON(){downloadBlob(new Blob([JSON.stringify({app:"TickBrick",version:1,exportedAt:new Date().toISOString(),data:state},null,2)],{type:"application/json"}),"TickBrick_行程備份_"+todayString()+".json");}
-function importJSON(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result),raw=parsed.data||parsed;if(!Array.isArray(raw)&&(!raw||typeof raw!=="object"||!Array.isArray(raw.dates)))throw new Error("format");const imported=normalizeState(raw);askConfirm("匯入並取代現有資料","匯入備份會取代目前所有日期、行程、暫存項目與類別顏色。確定繼續嗎？","取代並匯入",()=>{state=imported;if(state.activeDate)activeCalendarMonth=new Date(state.activeDate+"T12:00:00");persist();render();showToast("備份匯入完成");});}catch(error){showToast("無法讀取此 JSON 行程備份");}};reader.readAsText(file,"UTF-8");}
+function importJSON(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result),raw=parsed.data||parsed;if(!Array.isArray(raw)&&(!raw||typeof raw!=="object"||!Array.isArray(raw.dates)))throw new Error("format");const imported=normalizeState(raw);askConfirm("匯入並取代現有資料","匯入備份會取代目前所有日期、行程、暫存項目與類別顏色。確定繼續嗎？","取代並匯入",()=>{state=imported;if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();showToast("備份匯入完成");});}catch(error){showToast("無法讀取此 JSON 行程備份");}};reader.readAsText(file,"UTF-8");}
 function todayString(){return new Date().toISOString().slice(0,10);}
 function downloadBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}
 
@@ -315,8 +318,8 @@ function askConfirm(title,message,confirmText,onConfirm){openDialog(title,messag
 /* 連接畫面事件並首次繪製。 */
 document.getElementById("addRowButton").addEventListener("click",addRow);
 document.getElementById("calendarToggle").addEventListener("click",()=>openCalendar(true));
-document.getElementById("calendarPrev").addEventListener("click",()=>{activeCalendarMonth.setMonth(activeCalendarMonth.getMonth()-1);renderCalendar();});
-document.getElementById("calendarNext").addEventListener("click",()=>{activeCalendarMonth.setMonth(activeCalendarMonth.getMonth()+1);renderCalendar();});
+document.getElementById("calendarPrev").addEventListener("click",()=>{activeCalendarMonth=new Date(activeCalendarMonth.getFullYear(),activeCalendarMonth.getMonth()-1,1);renderCalendar();});
+document.getElementById("calendarNext").addEventListener("click",()=>{activeCalendarMonth=new Date(activeCalendarMonth.getFullYear(),activeCalendarMonth.getMonth()+1,1);renderCalendar();});
 document.addEventListener("click",e=>{const pop=document.getElementById("calendarPopover"),menu=document.querySelector(".export-menu");if(!pop.contains(e.target)&&!document.getElementById("calendarToggle").contains(e.target))pop.hidden=true;if(menu.open&&!menu.contains(e.target))menu.open=false;});
 const stagingSection=document.getElementById("stagingSection");
 stagingSection.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&draggedRow.area==="day"){e.preventDefault();stagingSection.classList.add("drop-target");}});
