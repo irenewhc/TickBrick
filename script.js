@@ -78,7 +78,7 @@ function rowMarkup(row,index,area){
  '<td><div class="duration-cell"><div class="duration-editor"><input type="number" class="duration-input'+inputClass("duration")+'" min="1" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"><span>分鐘</span>'+(area==="day"?lockButton("duration"):"")+'</div><span class="duration-display">'+formatDuration(row.duration)+'</span></div></td>'+
  '<td><select class="category-select" aria-label="類別" style="background-color:'+color+'" data-field="category">'+categoryOptions(row.category)+'</select></td>'+
  '<td><input class="content-input" type="text" aria-label="行程內容" value="'+esc(row.content)+'" placeholder="輸入行程內容" data-field="content"></td>'+
- '<td class="row-actions">'+(area==="day"?(pending?'<button class="button small primary" data-action="place">放置此處</button><button class="button small secondary" data-action="stage">移至暫存</button>':'<button class="button small secondary" data-action="move">移至其他日期</button><button class="button small secondary" data-action="stage">移至暫存</button>'):'<button class="button small secondary" data-action="move">移至其他日期</button>')+'</td>'+
+ '<td><div class="row-actions">'+(area==="day"?(pending?'<button class="button small primary" data-action="place">放置此處</button><button class="button small secondary" data-action="stage">移至暫存</button>':'<button class="button small secondary" data-action="move">移至其他日期</button><button class="button small secondary" data-action="stage">移至暫存</button>'):'<button class="button small secondary" data-action="move">移至其他日期</button>')+'</div></td>'+
  '<td><button class="icon-button" data-action="delete" aria-label="刪除行程">×</button></td></tr>';
 }
 function bindRows(root,area){
@@ -115,7 +115,7 @@ function reorderRow(area,fromId,toId){
  modifiedRowId=null;modifiedField=null;lockedConflictId=null;
  const backup=structuredClone(list),row=list.splice(from,1)[0];list.splice(to,0,row);
  if(area==="day"){const error=cascadeFrom(Math.min(from,to));if(error){state.days[state.activeDate]=backup;modifiedRowId=fromId;draggedRow=null;persist();render();openConflictModal(error);return;}}
- draggedRow=null;persist();render();if(area==="day")showToast("排序已更新，時間自動串聯完成");
+ draggedRow=null;persist();render();if(area==="day")showToast("排序已更新");
 }
 function cascadeFrom(index){
  const rows=activeRows();lockedConflictId=null;
@@ -155,16 +155,16 @@ function handleTimeEdit(id,field,value){
  if(!row.start&&!row.end){row[field]=parsed;if(field==="start"&&row.start){row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"結束時間");}if(field==="end"&&row.end){row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"開始時間");}persist();render();return;}
  if(field==="start"&&!row.end){row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"結束時間");}
  if(field==="end"&&!row.start){row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"開始時間");}
- const question=field==="start"?"開始時間已修改，請選擇要固定的欄位。":field==="end"?"結束時間已修改，請選擇要固定的欄位。":"總時長已修改，請選擇要固定的欄位。";
+ const question=field==="start"?"開始時間已修改，請選擇要推算的欄位。":field==="end"?"結束時間已修改，請選擇要推算的欄位。":"總時長已修改，請選擇要推算的欄位。";
  const options=field==="start"?[
-  {text:"總時長不變，推算結束時間",calculated:"結束時間",cls:"primary",apply:()=>{row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));}},
-  {text:"結束時間不變，推算總時長",calculated:"總時長",cls:"secondary",apply:()=>{row.start=parsed;row.duration=durationBetween(row.start,row.end);}}
+  {text:"推算結束時間",calculated:"結束時間",cls:"primary",apply:()=>{row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));}},
+  {text:"推算總時長",calculated:"總時長",cls:"secondary",apply:()=>{row.start=parsed;row.duration=durationBetween(row.start,row.end);}}
  ]:field==="end"?[
-  {text:"總時長不變，推算開始時間",calculated:"開始時間",cls:"primary",apply:()=>{row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));}},
-  {text:"開始時間不變，推算總時長",calculated:"總時長",cls:"secondary",apply:()=>{row.end=parsed;row.duration=durationBetween(row.start,row.end);}}
+  {text:"推算開始時間",calculated:"開始時間",cls:"primary",apply:()=>{row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));}},
+  {text:"推算總時長",calculated:"總時長",cls:"secondary",apply:()=>{row.end=parsed;row.duration=durationBetween(row.start,row.end);}}
  ]:[
-  {text:"開始時間不變，推算結束時間",calculated:"結束時間",cls:"primary",apply:()=>{row.duration=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration));}},
-  {text:"結束時間不變，推算開始時間",calculated:"開始時間",cls:"secondary",apply:()=>{row.duration=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration));}}
+  {text:"推算結束時間",calculated:"結束時間",cls:"primary",apply:()=>{row.duration=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration));}},
+  {text:"推算開始時間",calculated:"開始時間",cls:"secondary",apply:()=>{row.duration=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration));}}
  ];
  openDialog(question,question,options.map(option=>({text:option.text,cls:option.cls,run:()=>{option.apply();finishTimeEdit(row,index,backup,field,option.calculated);}})).concat([{text:"取消",cls:"secondary",run:()=>renderDay()}]));
 }
@@ -187,7 +187,7 @@ function moveRowToStaging(row){
  const list=activeRows(),index=list.indexOf(row);if(index<0)return;
  const backup=structuredClone(list);list.splice(index,1);row.start="";row.end="";row.date="";row.pending=false;row.lock="none";row.isNew=false;state.staging.push(row);
  const error=cascadeFrom(Math.max(0,index-1));if(error){state.staging.pop();state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}
- draggedRow=null;persist();render();showToast("行程已移至共用暫存區，時間已重新串聯");
+ draggedRow=null;persist();render();showToast("行程已移至共用暫存區");
 }
 function moveStagingRowToDay(row,targetId){
  if(!state.activeDate)return;
