@@ -18,6 +18,7 @@
   <meta name="twitter:description" content="TickBrick 讓行程像積木般自由堆疊。怎麼玩，時間都連動不卡關！">
   <meta name="twitter:image" content="https://irenewhc.github.io/TickBrick/TickBrick_LOGO_Y.png">
   <link rel="icon" type="image/png" href="TickBrick_LOGO_Y_N.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -25,10 +26,10 @@
     <header class="page-header">
       <div><h1>TickBrick</h1><p class="subtitle">行程樂高</p></div>
       <div class="header-actions">
-        <button id="calendarToggle" class="button secondary" type="button">📅 選擇 / 新增日期</button>
-        <button id="addRowButton" class="button primary" type="button">＋ 新增行程</button>
+        <button id="calendarToggle" class="button secondary" type="button">選擇 / 新增日期  <i class="fa-solid fa-calendar-days"></i></button>
+        <button id="addRowButton" class="button primary" type="button">新增行程 <i class="fa-solid fa-circle-plus"></i></button>
         <details class="export-menu">
-          <summary>備份與匯出</summary>
+          <summary>備份與匯出 <i class="fa-solid fa-download"></i></summary>
           <div class="export-menu-list">
             <button id="exportJsonButton" class="button secondary" type="button">匯出備份 JSON</button>
             <button id="importJsonButton" class="button secondary" type="button">匯入備份 JSON</button>
@@ -38,7 +39,7 @@
         </details>
         <input id="importFile" type="file" accept="application/json,.json" hidden>
         <div id="calendarPopover" class="calendar-popover" hidden>
-          <div class="calendar-heading"><button id="calendarPrev" aria-label="上個月">‹</button><strong id="calendarMonth"></strong><button id="calendarNext" aria-label="下個月">›</button></div>
+          <div class="calendar-heading"><button id="calendarPrev" aria-label="上個月"><i class="fa-solid fa-angle-left"></i></button><strong id="calendarMonth"></strong><button id="calendarNext" aria-label="下個月"><i class="fa-solid fa-angle-right"></i></button></div>
           <div class="calendar-grid" id="calendarGrid"></div>
           <div class="calendar-legend"><span><i class="legend-has"></i>已有日期頁籤</span><span><i class="legend-none"></i>尚未建立</span></div>
         </div>
