@@ -93,11 +93,10 @@ h1 {
 
 .button:hover {
     filter: brightness(.97);
-    transform: translateY(-1px)
+    transform: translateY(-3px)
 }
 
 #calendarToggle:hover {
-    background: var(--color-yellow);
     filter: none
 }
 
@@ -108,12 +107,17 @@ h1 {
 }
 
 .button.primary {
-    background: var(--color-olive);
-    color: white;
+    background: var(--color-yellow);
+    border: 2px solid var(--color-yellow);
+}
+
+.button.minor {
+    background: white;
+    border: 2px solid var(--color-yellow);
 }
 
 .button.secondary {
-    background: #e6e6e6;
+    /* background: white; */
 }
 
 .button.danger {
@@ -153,11 +157,15 @@ h1 {
     min-width: 0;
     border-radius: 8px 8px 0 0;
     overflow: hidden;
-    transition: flex-grow .18s ease
+    transition: flex-grow .18s ease;
 }
 
 .date-tab:hover {
-    flex-grow: 2.2
+    flex-grow: 2.2;
+}
+
+.date-tabs.is-dragging .date-tab:hover {
+    flex-grow: 1;
 }
 
 .date-tab-select {
@@ -171,12 +179,12 @@ h1 {
     color: #66727f;
     white-space: nowrap;
     cursor: pointer;
-    flex: 1
+    flex: 1;
 }
 
 .date-tab:hover .date-tab-select {
     overflow: visible;
-    text-overflow: clip
+    text-overflow: clip;
 }
 
 .date-tab:hover .date-tab-select:after,
@@ -193,7 +201,7 @@ h1 {
 
 .date-tab.active .date-tab-select {
     color: var(--color-dark-slate);
-    background: var(--color-yellow-light);
+    background: var(--color-mint-bg);
     font-weight: 700;
 }
 
@@ -208,7 +216,7 @@ h1 {
 }
 
 .date-tab.active .date-tab-close {
-    background: var(--color-yellow-light);
+    background: var(--color-mint-bg);
     color: var(--color-dark-slate);
 }
 
@@ -223,6 +231,32 @@ h1 {
 
 .date-tab:active {
     cursor: grabbing
+}
+
+.date-tab.tab-dragging {
+    opacity: .45
+}
+
+.date-tab.tab-drop-before::before,
+.date-tab.tab-drop-after::after {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    top: 5px;
+    bottom: 5px;
+    width: 4px;
+    border-radius: 4px;
+    background: #5662e9;
+    box-shadow: 0 0 0 2px #eef0ff;
+    pointer-events: none
+}
+
+.date-tab.tab-drop-before::before {
+    left: 0
+}
+
+.date-tab.tab-drop-after::after {
+    right: 0
 }
 
 .export-menu {
@@ -356,6 +390,10 @@ td {
 
 .schedule-row.drag-over {
     box-shadow: inset 0 3px #5662e9
+}
+
+.schedule-row.row-dragging {
+    opacity: .42
 }
 
 .pending-row {
@@ -508,7 +546,7 @@ select {
 
 .icon-button:hover {
     background: #f7e9eb;
-    color: #be3844
+    color: var(--color-red)
 }
 
 .empty-state {
@@ -540,7 +578,7 @@ select {
 
 .staging-drop-hint {
     margin-top: 5px !important;
-    color: #5965db !important;
+    color: var(--color-dark-slate) !important;
     font-weight: 650
 }
 
@@ -647,8 +685,8 @@ select {
 }
 
 .calendar-day.has-date {
-    background: #e4f3ea;
-    color: #267347;
+    background: var(--color-pink-light);
+    color: var(--color-red);
     font-weight: 700
 }
 
