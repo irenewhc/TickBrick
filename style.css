@@ -1,3 +1,4 @@
+/* 基礎設定：字型、色彩變數與全域版面 */
 :root {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: #293645;
@@ -42,6 +43,7 @@ select {
     font: inherit;
 } */
 
+/* 頁首與共用按鈕 */
 .container {
     max-width: 1220px;
     margin: 0 auto;
@@ -131,6 +133,7 @@ h1 {
     white-space: nowrap
 }
 
+/* 日期導覽與頁籤 */
 .date-navigation {
     display: flex;
     align-items: center;
@@ -220,9 +223,10 @@ h1 {
     color: var(--color-dark-slate);
 }
 
-.date-tab-close:hover {
-    background: var(--color-pink-light) !important;
-    color: var(--color-red) !important;
+.date-tab-close:hover,
+.date-tab.active .date-tab-close:hover {
+    background: var(--color-pink-light);
+    color: var(--color-red);
 }
 
 .date-tab[draggable=true] {
@@ -259,6 +263,7 @@ h1 {
     right: 0
 }
 
+/* 備份與匯出選單 */
 .export-menu {
     position: relative
 }
@@ -303,6 +308,7 @@ h1 {
     white-space: nowrap
 }
 
+/* 行程區段與表格基礎 */
 .day-section {
     margin-bottom: 32px
 }
@@ -355,6 +361,7 @@ td {
     vertical-align: middle
 }
 
+/* 表格欄位寬度 */
 .order-col {
     width: 76px
 }
@@ -380,6 +387,7 @@ td {
     width: 50px
 }
 
+/* 行程列狀態與拖曳效果 */
 .schedule-row {
     background: #fff
 }
@@ -396,23 +404,24 @@ td {
     opacity: .42
 }
 
-.pending-row {
-    background: #fff8df !important
+.schedule-row.pending-row {
+    background: #fff8df
 }
 
-.new-row-highlight {
-    background: #e9f49d !important
+.schedule-row.new-row-highlight {
+    background: #e9f49d
 }
 
-.conflict-highlight {
+.schedule-row.conflict-highlight {
     outline: 3px solid #e74c3c;
     outline-offset: -3px;
-    background: #fdedec !important;
+    background: #fdedec;
     animation: pulse-border 1s infinite alternate
 }
 
+/* 行程欄位、鎖定與操作按鈕 */
 .conflict-field-highlight {
-    background: #ffeaa7 !important;
+    background: #ffeaa7;
     box-shadow: 0 0 8px #d6303199;
     font-weight: 700
 }
@@ -549,6 +558,7 @@ select {
     color: var(--color-red)
 }
 
+/* 空白狀態、暫存區與類別設定 */
 .empty-state {
     padding: 27px;
     text-align: center;
@@ -576,9 +586,9 @@ select {
     box-shadow: 0 0 0 3px #5662e929
 }
 
-.staging-drop-hint {
-    margin-top: 5px !important;
-    color: var(--color-dark-slate) !important;
+.section-heading .staging-drop-hint {
+    margin-top: 5px;
+    color: var(--color-dark-slate);
     font-weight: 650
 }
 
@@ -632,6 +642,7 @@ select {
     cursor: pointer
 }
 
+/* 日曆 */
 .calendar-popover {
     position: absolute;
     right: 0;
@@ -729,6 +740,7 @@ select {
     background: #f0f2f5
 }
 
+/* 對話框、確認視窗與匯出選項 */
 .app-dialog {
     width: min(520px, calc(100% - 30px));
     border: 0;
@@ -853,6 +865,7 @@ select {
     color: #87919b
 }
 
+/* 系統提示訊息 */
 #toast {
     position: fixed;
     bottom: 22px;
@@ -875,6 +888,7 @@ select {
     transform: translate(-50%, 0)
 }
 
+/* 手機版 */
 @media(max-width:720px) {
     body {
         padding: 12px 8px 36px
@@ -962,6 +976,7 @@ select {
     }
 }
 
+/* 列印版 */
 @media print {
     body {
         padding: 0;
@@ -979,7 +994,7 @@ select {
     .staging-section,
     .category-settings,
     .section-heading button {
-        display: none !important
+        display: none
     }
 
     .table-wrap {
