@@ -10,10 +10,10 @@ const INITIAL_ROWS = [
 ];
 let state=loadState();
 let activeCalendarMonth=state.activeDate?calendarMonthFor(state.activeDate):new Date(2026,9,1);
-let draggedRow=null, autosaveTimer, calendarCreateMode=false;
-let modifiedRowId=null, modifiedField=null, lockedConflictId=null;
+let draggedRow=null, autosaveTimer, calendarCreateMode=false, touchDrag=null, touchCandidate=null, touchClickUntil=0;
 
-function blankState(){return{version:1,dates:[],activeDate:"",days:{},staging:[],categories:DEFAULT_CATEGORIES.map(x=>({...x}))};}
+/* 建立含未解決衝突欄位的空白應用程式狀態。 */
+function blankState(){return{version:2,dates:[],activeDate:"",days:{},staging:[],categories:DEFAULT_CATEGORIES.map(x=>({...x})),conflicts:[]};}
 function makeId(){return"r"+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
 function makeRow(date,start,end,duration,category,content){return{id:makeId(),date:date||"",start:start||"",end:end||"",duration:Number(duration)||60,lock:"none",category:category||"",content:content||"",pending:false};}
 function loadState(){
@@ -24,6 +24,7 @@ function loadState(){
  }catch(error){console.error("行程資料讀取失敗",error);}
  const initial=blankState(),date="2026-10-29";initial.dates=[date];initial.activeDate=date;initial.days[date]=INITIAL_ROWS.map(r=>makeRow(date,...r));return initial;
 }
+/* 將舊版或匯入資料正規化為含衝突保存資訊的目前狀態格式。 */
 function normalizeState(input){
  const result=blankState();
  if(Array.isArray(input)){input.forEach(row=>{const date=row.date||"2026-10-29";if(!result.days[date]){result.days[date]=[];result.dates.push(date);}result.days[date].push({...row,id:row.id||makeId(),date,pending:false});});result.dates.sort();result.activeDate=result.dates[0]||"";return result;}
@@ -32,6 +33,7 @@ function normalizeState(input){
  result.dates.forEach(date=>result.days[date]=Array.isArray(input.days&&input.days[date])?input.days[date].map(row=>({...row,id:row.id||makeId(),date,pending:!!row.pending})):[]);
  result.staging=Array.isArray(input.staging)?input.staging.map(row=>({...row,id:row.id||makeId(),date:"",start:"",end:"",pending:false})):[];
  result.categories=Array.isArray(input.categories)?input.categories.map(c=>({name:String(c.name),color:/^#[0-9a-f]{6}$/i.test(c.color)?c.color:"#FFFFFF"})):DEFAULT_CATEGORIES.map(c=>({...c}));
+ result.conflicts=Array.isArray(input.conflicts)?input.conflicts.filter(conflict=>conflict&&typeof conflict==="object"&&typeof conflict.lockedRowId==="string"&&typeof conflict.lockedField==="string").map(conflict=>({...conflict})):[];
  DEFAULT_CATEGORIES.forEach(def=>{if(!result.categories.some(c=>c.name===def.name))result.categories.push({...def});});return result;
 }
 function validDate(value){return/^\d{4}-\d{2}-\d{2}$/.test(value)&&!isNaN(new Date(value+"T12:00:00").getTime());}
@@ -43,17 +45,81 @@ function dateLabel(value,year){if(!value)return"";const d=new Date(value+"T12:00
 function showToast(message){const toast=document.getElementById("toast");toast.textContent=message;toast.classList.add("show");clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>toast.classList.remove("show"),2100);}
 function activeRows(){return state.days[state.activeDate]||[];}
 
+/* 以 250ms 長按與 10px 移動門檻建立觸控拖曳候選，未啟動時不攔截頁面捲動。 */
+function beginTouchDrag(event,details){
+ if(event.pointerType!=="touch"||event.button!==0||touchDrag||touchCandidate)return;
+ const candidate={...details,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,lastY:event.clientY,activated:false,cancelled:false,scrolling:false};
+ touchCandidate=candidate;
+ const move=moveEvent=>{
+  if(moveEvent.pointerId!==candidate.pointerId)return;
+  if(!candidate.activated&&Math.hypot(moveEvent.clientX-candidate.startX,moveEvent.clientY-candidate.startY)>10){
+   candidate.cancelled=true;candidate.scrolling=true;clearTimeout(candidate.timer);
+   const scrollBy=candidate.lastY-moveEvent.clientY;if(scrollBy)window.scrollBy(0,scrollBy);candidate.lastY=moveEvent.clientY;return;
+  }
+  if(candidate.scrolling){const scrollBy=candidate.lastY-moveEvent.clientY;if(scrollBy)window.scrollBy(0,scrollBy);candidate.lastY=moveEvent.clientY;return;}
+  if(candidate.activated){moveEvent.preventDefault();updateTouchDrag(moveEvent.clientX,moveEvent.clientY);}
+ };
+ const finish=upEvent=>{
+  if(upEvent.pointerId!==candidate.pointerId)return;
+  clearTimeout(candidate.timer);if(candidate.activated){upEvent.preventDefault();updateTouchDrag(upEvent.clientX,upEvent.clientY);finishTouchDrag();}removeCandidate();
+ };
+ const cancel=cancelEvent=>{if(cancelEvent.pointerId!==candidate.pointerId)return;clearTimeout(candidate.timer);if(candidate.activated){clearTouchDragVisuals();touchDrag=null;}removeCandidate();};
+ const removeCandidate=()=>{if(touchCandidate===candidate)touchCandidate=null;window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",finish);window.removeEventListener("pointercancel",cancel);};
+ candidate.timer=setTimeout(()=>{if(candidate.cancelled)return;candidate.activated=true;touchCandidate=null;touchDrag={...candidate,target:null};details.source.classList.add(details.type==="tab"?"tab-dragging":"row-dragging");createTouchPreview(details.source,event.clientX,event.clientY);try{(details.capture||details.source).setPointerCapture(event.pointerId);}catch(error){}updateTouchDrag(event.clientX,event.clientY);},250);
+ window.addEventListener("pointermove",move,{passive:false});window.addEventListener("pointerup",finish,{passive:false});window.addEventListener("pointercancel",cancel,{passive:false});
+}
+/* 建立跟隨手指的完整行程列或頁籤視覺預覽，不參與命中判斷。 */
+function createTouchPreview(source,x,y){
+ const preview=document.createElement("div"),rect=source.getBoundingClientRect();preview.className="touch-drag-preview";preview.dataset.type=source.matches(".date-tab")?"tab":"row";preview.style.width=rect.width+"px";
+ if(source.matches("tr")){const table=document.createElement("table"),body=document.createElement("tbody"),clone=source.cloneNode(true);table.append(body);body.append(clone);preview.append(table);}else preview.append(source.cloneNode(true));
+ document.body.append(preview);positionTouchPreview(x,y);
+}
+/* 將觸控預覽置於手指右下方，避免遮住實際放置目標。 */
+function positionTouchPreview(x,y){const preview=document.querySelector(".touch-drag-preview");if(preview){preview.style.transform="translate("+(x+14)+"px,"+(y+14)+"px)";}}
+/* 清除目前觸控拖曳所留下的來源、插入線與目標提示。 */
+function clearTouchDragVisuals(){document.querySelector(".touch-drag-preview")?.remove();document.querySelectorAll(".row-dragging,.tab-dragging,.touch-drop-before,.touch-drop-after,.tab-drop-before,.tab-drop-after,.drag-over,.drop-target").forEach(element=>element.classList.remove("row-dragging","tab-dragging","touch-drop-before","touch-drop-after","tab-drop-before","tab-drop-after","drag-over","drop-target"));}
+/* 根據手指下方的列、暫存區或頁籤更新前後插入位置與放置目標。 */
+function updateTouchDrag(x,y){
+ if(!touchDrag)return;positionTouchPreview(x,y);touchDrag.target=null;clearTouchDropTarget();const element=document.elementFromPoint(x,y),tab=element&&element.closest(".date-tab"),row=element&&element.closest("tr[data-id]"),staging=element&&element.closest("#stagingSection"),emptyDay=element&&element.closest("#emptyDay");
+ if(touchDrag.type==="tab"){
+  if(!tab)return;const rect=tab.getBoundingClientRect(),before=x<rect.left+rect.width/2;tab.classList.add(before?"tab-drop-before":"tab-drop-after");touchDrag.target={kind:"tab",index:[...document.querySelectorAll(".date-tab")].indexOf(tab)+(before?0:1)};return;
+ }
+ if(row){const area=row.dataset.area;
+  if(touchDrag.area==="day"&&area==="staging"){staging?.classList.add("drop-target");touchDrag.target={kind:"staging"};return;}
+  if((touchDrag.area===area)||(touchDrag.area==="staging"&&area==="day")){const rect=row.getBoundingClientRect(),after=y>=rect.top+rect.height/2;row.classList.add(after?"touch-drop-after":"touch-drop-before");touchDrag.target={kind:"row",area,id:row.dataset.id,after};return;}
+ }
+ if(touchDrag.area==="day"&&staging){staging.classList.add("drop-target");touchDrag.target={kind:"staging"};}
+ else if(touchDrag.area==="staging"&&emptyDay){emptyDay.classList.add("drag-over");touchDrag.target={kind:"empty-day"};}
+}
+/* 在重新判斷目標前移除上一個觸控放置提示，但保留來源與預覽。 */
+function clearTouchDropTarget(){document.querySelectorAll(".touch-drop-before,.touch-drop-after,.tab-drop-before,.tab-drop-after,.drag-over,.drop-target").forEach(element=>element.classList.remove("touch-drop-before","touch-drop-after","tab-drop-before","tab-drop-after","drag-over","drop-target"));}
+/* 完成觸控放置；只有有效目標才改資料，其他位置一律取消。 */
+function finishTouchDrag(){
+ const current=touchDrag;if(!current)return;clearTouchDragVisuals();touchDrag=null;
+ if(current.type==="tab"&&current.target){touchClickUntil=Date.now()+450;const from=current.index,dropIndex=current.target.index,to=dropIndex>from?dropIndex-1:dropIndex,item=state.dates.splice(from,1)[0];state.dates.splice(to,0,item);persist();renderTabs();return;}
+ if(current.type!=="row"||!current.target)return;
+ const row=getRow(current.area,current.id);if(!row)return;
+ if(current.target.kind==="staging"&&current.area==="day")moveRowToStaging(row);
+ else if(current.target.kind==="empty-day"&&current.area==="staging")moveStagingRowToDay(row);
+ else if(current.target.kind==="row"){
+  if(current.area==="staging"&&current.target.area==="day")moveStagingRowToDay(row,current.target.id,current.target.after);
+  else if(current.area===current.target.area)reorderRow(current.area,current.id,current.target.id,current.target.after);
+ }
+}
+
 /* 繪製日期頁籤、當日清單、共用暫存區與類別色彩設定。 */
 function render(){renderTabs();renderDay();renderStaging();renderCategories();renderCalendar();}
+/* 繪製日期頁籤，保留滑鼠原生拖曳並掛上觸控長按拖曳入口。 */
 function renderTabs(){
  const root=document.getElementById("dateTabs");root.innerHTML="";
  state.dates.forEach((date,index)=>{const tab=document.createElement("div");tab.className="date-tab"+(date===state.activeDate?" active":"");tab.draggable=true;tab.dataset.date=date;
-  const select=document.createElement("button");select.type="button";select.className="date-tab-select";select.textContent=dateLabel(date);select.setAttribute("role","tab");select.setAttribute("aria-selected",date===state.activeDate?"true":"false");select.addEventListener("click",()=>{state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();});
+  const select=document.createElement("button");select.type="button";select.className="date-tab-select";select.textContent=dateLabel(date);select.setAttribute("role","tab");select.setAttribute("aria-selected",date===state.activeDate?"true":"false");select.addEventListener("click",event=>{if(Date.now()<touchClickUntil){event.preventDefault();return;}state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();});
   const close=document.createElement("button");close.type="button";close.className="date-tab-close";close.textContent="×";close.setAttribute("aria-label","刪除 "+dateLabel(date,true));close.draggable=false;close.addEventListener("click",e=>{e.stopPropagation();deleteDate(date);});tab.append(select,close);
   tab.addEventListener("dragstart",e=>{if(e.target.closest(".date-tab-close")){e.preventDefault();return;}draggedRow={type:"tab",index,dropIndex:index};root.classList.add("is-dragging");tab.classList.add("tab-dragging");e.dataTransfer.effectAllowed="move";});
   tab.addEventListener("dragover",e=>{if(!draggedRow||draggedRow.type!=="tab")return;e.preventDefault();root.querySelectorAll(".tab-drop-before,.tab-drop-after").forEach(item=>item.classList.remove("tab-drop-before","tab-drop-after"));const before=e.clientX<tab.getBoundingClientRect().left+tab.offsetWidth/2;tab.classList.add(before?"tab-drop-before":"tab-drop-after");draggedRow.dropIndex=index+(before?0:1);});
   tab.addEventListener("drop",e=>{e.preventDefault();if(!draggedRow||draggedRow.type!=="tab")return;const from=draggedRow.index,to=draggedRow.dropIndex>from?draggedRow.dropIndex-1:draggedRow.dropIndex,item=state.dates.splice(from,1)[0];state.dates.splice(to,0,item);draggedRow=null;root.classList.remove("is-dragging");persist();renderTabs();});
   tab.addEventListener("dragend",()=>{draggedRow=null;root.classList.remove("is-dragging");root.querySelectorAll(".tab-dragging,.tab-drop-before,.tab-drop-after").forEach(item=>item.classList.remove("tab-dragging","tab-drop-before","tab-drop-after"));});root.appendChild(tab);
+  tab.addEventListener("pointerdown",event=>{if(event.target.closest(".date-tab-close"))return;beginTouchDrag(event,{type:"tab",index,source:tab,capture:tab});});
  });
 }
 function renderDay(){
@@ -67,10 +133,11 @@ function renderStaging(){
  root.innerHTML=state.staging.map((row,index)=>rowMarkup(row,index,"staging")).join("");bindRows(root,"staging");
 }
 function categoryOptions(value){return'<option value=""></option>'+state.categories.map(c=>'<option value="'+esc(c.name)+'" '+(value===c.name?"selected":"")+'>'+esc(c.name)+'</option>').join("");}
+/* 產生正式區或暫存區單列 HTML，並套用保存中的衝突提示狀態。 */
 function rowMarkup(row,index,area){
  const color=(state.categories.find(c=>c.name===row.category)||{}).color||"#FFFFFF",pending=!!row.pending;
- const rowClass=["schedule-row",pending?"pending-row":"",area==="day"&&row.isNew?"new-row-highlight":"",lockedConflictId===row.id?"conflict-highlight":""].filter(Boolean).join(" ");
- const inputClass=field=>modifiedRowId===row.id&&modifiedField===field?" conflict-field-highlight":"";
+ const rowClass=["schedule-row",pending?"pending-row":"",area==="day"&&row.isNew?"new-row-highlight":"",hasConflictForRow(row.id)?"conflict-highlight":""].filter(Boolean).join(" ");
+ const inputClass=field=>hasConflictForInput(row.id,field)?" conflict-field-highlight":"";
  const lockButton=field=>'<button class="lock-btn '+(row.lock===field?"locked":"")+'" data-lock="'+field+'" title="鎖定'+({start:"開始時間",end:"結束時間",duration:"總時長"}[field])+'">'+(row.lock===field?"🔒":"🔓")+'</button>';
  const editDisabled=area==="staging"||pending;
  return'<tr class="'+rowClass+'" data-id="'+esc(row.id)+'" data-index="'+index+'" data-area="'+area+'">'+
@@ -80,9 +147,10 @@ function rowMarkup(row,index,area){
  '<td><div class="duration-cell"><div class="duration-editor"><input type="number" class="duration-input'+inputClass("duration")+'" min="1" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"><span>分鐘</span>'+(area==="day"?lockButton("duration"):"")+'</div><span class="duration-display">'+formatDuration(row.duration)+'</span></div></td>'+
  '<td><select class="category-select" aria-label="類別" style="background-color:'+color+'" data-field="category">'+categoryOptions(row.category)+'</select></td>'+
  '<td><input class="content-input" type="text" aria-label="行程內容" value="'+esc(row.content)+'" placeholder="輸入行程內容" data-field="content"></td>'+
- '<td><div class="row-actions">'+(area==="day"?(pending?'<button class="button small primary" data-action="place">放置此處</button><button class="button small secondary" data-action="stage">移至暫存</button>':'<button class="button small secondary" data-action="move">移至其他日期</button><button class="button small secondary" data-action="stage">移至暫存</button>'):'<button class="button small secondary" data-action="move">移至其他日期</button>')+'</div></td>'+
+ '<td><div class="row-actions">'+(area==="day"?(pending?'<button class="button small primary" data-action="place">放置此處</button><button class="button small minor" data-action="stage">移至暫存</button>':'<button class="button small" data-action="move">移至其他日期</button><button class="button small" data-action="stage">移至暫存</button>'):'<button class="button small" data-action="move">移至其他日期</button>')+'</div></td>'+
  '<td><button class="icon-button" data-action="delete" aria-label="刪除行程">×</button></td></tr>';
 }
+/* 綁定行程列的桌面拖放、觸控拖放、欄位編輯與行程操作。 */
 function bindRows(root,area){
  root.querySelectorAll("tr[data-id]").forEach(tr=>{const row=getRow(area,tr.dataset.id);
   tr.addEventListener("focusin",()=>{if(row.isNew){row.isNew=false;tr.classList.remove("new-row-highlight");persist();}});
@@ -96,89 +164,194 @@ function bindRows(root,area){
    if(area==="day"&&!row.pending&&["start","end","duration"].includes(field))handleTimeEdit(row.id,field,input.value);
    else updateRow(area,row.id,field,input.value);
   }));
-  tr.querySelectorAll("[data-lock]").forEach(button=>button.addEventListener("click",()=>{row.lock=row.lock===button.dataset.lock?"none":button.dataset.lock;persist();renderDay();renderStaging();}));
+  tr.querySelectorAll("[data-lock]").forEach(button=>button.addEventListener("click",()=>{row.lock=row.lock===button.dataset.lock?"none":button.dataset.lock;clearConflictsAfterSuccess();renderDay();renderStaging();}));
   tr.querySelector(".category-select").addEventListener("change",e=>e.currentTarget.style.backgroundColor=(state.categories.find(c=>c.name===e.currentTarget.value)||{}).color||"#fff");
   tr.querySelectorAll("[data-action]").forEach(button=>button.addEventListener("click",()=>rowAction(area,row.id,button.dataset.action)));
+  tr.querySelector(".order-cell").addEventListener("pointerdown",event=>beginTouchDrag(event,{type:"row",area,id:row.id,source:tr,capture:event.currentTarget}));
  });
 }
 function getList(area){return area==="staging"?state.staging:activeRows();}
 function getRow(area,id){return getList(area).find(r=>r.id===id);}
+/* 將內部時間欄位名稱轉為衝突提示可讀的中文名稱。 */
+function fieldLabel(field){return({start:"開始時間",end:"結束時間",duration:"總時長"}[field]||field);}
+/* 判斷一列是否是任何未解決衝突的鎖定列。 */
+function hasConflictForRow(id){return state.conflicts.some(conflict=>conflict.lockedRowId===id);}
+/* 判斷輸入欄是否為直接輸入後仍須保留的衝突欄位。 */
+function hasConflictForInput(id,field){return state.conflicts.some(conflict=>conflict.directRowId===id&&conflict.directField===field);}
+/* 從目前日期向上找最近一筆非待放置正式行程索引。 */
+function formalIndexBefore(index){const rows=activeRows();for(let i=index-1;i>=0;i--)if(!rows[i].pending)return i;return-1;}
+/* 從目前日期向下找最近一筆非待放置正式行程索引。 */
+function formalIndexAfter(index){const rows=activeRows();for(let i=index+1;i<rows.length;i++)if(!rows[i].pending)return i;return-1;}
+/* 建立包含鎖定值、所需值與直接輸入來源的可保存衝突資料。 */
+function conflictFor(row,field,required,operation,direct){return{ id:makeId(),date:state.activeDate,lockedRowId:row.id,lockedField:field,lockedValue:row[field],requiredValue:required,operation:operation||"時間連動",directRowId:direct&&direct.rowId||"",directField:direct&&direct.field||""};}
+/* 安全寫入推算時間；若欄位鎖定且值不同則回傳衝突而不覆寫。 */
+function setTimeValue(row,field,value,operation,direct){if(row.lock===field&&row[field]!==value)return conflictFor(row,field,value,operation,direct);row[field]=value;return null;}
+/* 以原始排序意圖在副本上重跑，只有排序真正可成立時才解除已回復操作的衝突。 */
+function reorderConflictStillBlocks(conflict){
+ const context=conflict.reorderContext;if(!context)return true;
+ const rows=structuredClone(state.days[conflict.date]||[]),sourceIndex=rows.findIndex(row=>row.id===context.sourceId);
+ if(sourceIndex<0)return false;
+ const row=rows.splice(sourceIndex,1)[0],afterIndex=rows.findIndex(item=>item.id===context.afterId),beforeIndex=rows.findIndex(item=>item.id===context.beforeId);
+ const insertAt=afterIndex>=0?afterIndex:(beforeIndex>=0?beforeIndex+1:rows.length);rows.splice(insertAt,0,row);
+ const originalDate=state.activeDate,originalRows=state.days[conflict.date];state.activeDate=conflict.date;state.days[conflict.date]=rows;
+ try{return !!recalculateReorderedDayRow(row,rows.indexOf(row),"重新檢查排序衝突");}
+ finally{state.days[conflict.date]=originalRows;state.activeDate=originalDate;}
+}
+/* 在資料副本重播直接時間輸入的原始連動方式，確認整段受影響時間鏈是否仍碰到鎖定欄位。 */
+function directConflictStillBlocks(conflict){
+ const context=conflict.directContext;if(!context)return null;
+ const rows=structuredClone(state.days[conflict.date]||[]),originalDate=state.activeDate,originalRows=state.days[conflict.date];
+ state.activeDate=conflict.date;state.days[conflict.date]=rows;
+ try{
+  const row=rows.find(item=>item.id===conflict.directRowId),index=rows.indexOf(row);if(!row||index<0)return false;
+  const direct={rowId:row.id,field:context.field},value=row[context.field];
+  if(context.kind==="option")return!!applyTimeOption(row,index,context.field,value,context.key,direct);
+  const companion=context.field==="start"?"end":"start",next=context.field==="start"?timeAfter(row.start,Number(row.duration||60)):timeBefore(row.end,Number(row.duration||60));
+  return!!(setTimeValue(row,companion,next,context.operation,direct)||cascadeFrom(index,context.operation,direct));
+ }finally{state.days[conflict.date]=originalRows;state.activeDate=originalDate;}
+}
+/* 判斷鎖定與已回復操作的衝突是否仍會阻擋目前資料；直接輸入會先完整重播時間鏈。 */
+function conflictStillBlocks(conflict){
+ if(conflict.reorderContext)return reorderConflictStillBlocks(conflict);
+ if(conflict.directContext)return directConflictStillBlocks(conflict);
+ const rows=state.days[conflict.date]||[],index=rows.findIndex(item=>item.id===conflict.lockedRowId),row=rows[index];if(!row)return false;
+ if(row.lock!==conflict.lockedField)return false;
+ if(conflict.directRowId===row.id)return row[conflict.lockedField]!==conflict.requiredValue;
+ if(conflict.lockedField==="duration"){
+  if(durationBetween(row.start,row.end)!==Number(row.duration))return true;
+  const previousIndex=findFormalBefore(rows,index),nextIndex=findFormalAfter(rows,index),previous=rows[previousIndex],next=rows[nextIndex];
+  return !!((previous&&previous.end&&row.start&&previous.end!==row.start)||(next&&next.start&&row.end&&next.start!==row.end));
+ }
+ const neighbourIndex=conflict.lockedField==="start"?findFormalBefore(rows,index):findFormalAfter(rows,index);
+ if(neighbourIndex<0)return row[conflict.lockedField]!==conflict.requiredValue;
+ const neighbour=rows[neighbourIndex];return conflict.lockedField==="start"?neighbour.end!==row.start:neighbour.start!==row.end;
+}
+/* 在指定行程陣列中向上找最近一筆非待放置正式行程。 */
+function findFormalBefore(rows,index){for(let i=index-1;i>=0;i--)if(!rows[i].pending)return i;return-1;}
+/* 在指定行程陣列中向下找最近一筆非待放置正式行程。 */
+function findFormalAfter(rows,index){for(let i=index+1;i<rows.length;i++)if(!rows[i].pending)return i;return-1;}
+/* 重新檢查所有已保存衝突，僅保留仍確實阻擋的項目。 */
+function refreshConflicts(){state.conflicts=state.conflicts.filter(conflictStillBlocks);}
+/* 記錄鎖定衝突；排序回復時一併保存原本插入位置，供之後以真實重算判斷是否已解決。 */
+function recordConflict(conflict,reorderContext){if(reorderContext)conflict={...conflict,reorderContext};state.conflicts=state.conflicts.filter(item=>!(item.directRowId&&item.directRowId===conflict.directRowId&&item.directField===conflict.directField));state.conflicts.push(conflict);persist();}
+/* 成功完成一項操作後刷新衝突並保存目前狀態。 */
+function clearConflictsAfterSuccess(){refreshConflicts();persist();}
+/* 在衝突回復後重新寫回使用者直接輸入的欄位值。 */
+function setDirectValue(row,field,value){row[field]=value;}
+/* 更新非正式時間連動入口的欄位，並在成功後重檢既有衝突。 */
 function updateRow(area,id,field,value){
  const row=getRow(area,id);if(!row)return;
- const backup=area==="day"?structuredClone(activeRows()):null;
  if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");render();return;}
- if(field==="duration"){row.duration=Math.max(1,Number(value)||1);if(!row.pending&&row.start)row.end=minToTime(timeToMin(row.start)+row.duration);}
- else if(field==="start"||field==="end"){row[field]=formatTime(value);if(row.start&&row.end)row.duration=durationBetween(row.start,row.end);}
+ if(field==="duration"){row.duration=Math.max(1,Number(value)||1);}
+ else if(field==="start"||field==="end"){row[field]=formatTime(value);}
  else row[field]=value;
- if(!row.pending&&area==="day"&&(field==="start"||field==="duration"||field==="end")){const error=cascadeFrom(activeRows().indexOf(row));if(error){state.days[state.activeDate]=backup;showToast(error);}}
+ clearConflictsAfterSuccess();
  persist();renderDay();renderStaging();
 }
-function reorderRow(area,fromId,toId){
+/* 依排序後的相鄰正式行程選擇時間錨點；時間以 24 小時循環，最上方反推後也從原首列向下重算完整正式鏈。 */
+function recalculateReorderedDayRow(row,index,operation){
+ if(row.pending)return null;
+ const rows=activeRows(),previousIndex=findFormalBefore(rows,index);
+ if(previousIndex>=0)return cascadeForward(index,operation);
+ const nextIndex=findFormalAfter(rows,index);
+ if(nextIndex<0||!rows[nextIndex].start)return null;
+ const endConflict=setTimeValue(row,"end",rows[nextIndex].start,operation);
+ if(endConflict)return endConflict;
+ const start=timeBefore(row.end,Number(row.duration||60));
+ const startConflict=setTimeValue(row,"start",start,operation);
+ if(startConflict)return startConflict;
+ return cascadeForward(nextIndex,operation);
+}
+/* 依目標列前後位置重新排序，並以排序專用時間錨點重算；未傳第四參數時維持桌面原生放下即置於目標後的舊行為。 */
+function reorderRow(area,fromId,toId,placeAfter){
  if(!fromId||fromId===toId)return;const list=getList(area),from=list.findIndex(r=>r.id===fromId),to=list.findIndex(r=>r.id===toId);if(from<0||to<0)return;
- modifiedRowId=null;modifiedField=null;lockedConflictId=null;
- const backup=structuredClone(list),row=list.splice(from,1)[0];list.splice(to,0,row);
- if(area==="day"){const error=cascadeFrom(Math.min(from,to));if(error){state.days[state.activeDate]=backup;modifiedRowId=fromId;draggedRow=null;persist();render();openConflictModal(error);return;}}
- draggedRow=null;persist();render();if(area==="day")showToast("排序已更新");
+ const backup=structuredClone(list),row=list.splice(from,1)[0],insertAt=placeAfter===undefined?to:to+(placeAfter?1:0)-(from<to+(placeAfter?1:0)?1:0);list.splice(insertAt,0,row);
+ const reorderContext={sourceId:row.id,beforeId:list[insertAt-1]&&list[insertAt-1].id||"",afterId:list[insertAt+1]&&list[insertAt+1].id||""};
+ if(area==="day"){const conflict=recalculateReorderedDayRow(row,list.indexOf(row),"重新排序");if(conflict){state.days[state.activeDate]=backup;recordConflict(conflict,reorderContext);draggedRow=null;render();presentOperationConflict(conflict);return;}}
+ draggedRow=null;clearConflictsAfterSuccess();render();if(area==="day")showToast("排序已更新");
 }
-function cascadeFrom(index){
- const rows=activeRows();lockedConflictId=null;
- for(let i=Math.min(index,rows.length-1);i>0;i--){const current=rows[i],previous=rows[i-1];if(current.pending||previous.pending)break;if(!current.start)continue;
-  if(previous.lock==="end"&&previous.end!==current.start){lockedConflictId=previous.id;return conflictMessage(previous,"end");}
-  previous.end=current.start;
-  if(previous.lock==="duration"||!previous.start)previous.start=minToTime(timeToMin(previous.end)-Number(previous.duration||60));
-  else previous.duration=durationBetween(previous.start,previous.end);
- }
- for(let i=Math.max(0,index);i<rows.length;i++){const current=rows[i];if(current.pending)break;
-  if(i===0){if(current.start&&current.duration)current.end=minToTime(timeToMin(current.start)+Number(current.duration));continue;}
-  const previous=rows[i-1];if(previous.pending||!previous.end)break;
-  const targetEnd=minToTime(timeToMin(previous.end)+Number(current.duration||60));
-  if(current.lock==="start"&&current.start!==previous.end){lockedConflictId=current.id;return conflictMessage(current,"start");}
-  if(current.lock==="end"&&current.end!==targetEnd){lockedConflictId=current.id;return conflictMessage(current,"end");}
-  current.start=previous.end;if(current.lock==="end")current.duration=durationBetween(current.start,current.end);else current.end=targetEnd;
- }return"";
+/* 從指定正式行程向上串接，保留各列時長並以 24 小時循環推算開始時間。 */
+function cascadeBackward(index,operation,direct){
+ const rows=activeRows();let currentIndex=index;
+ while(currentIndex>=0){const current=rows[currentIndex];if(!current||current.pending||!current.start)break;const previousIndex=formalIndexBefore(currentIndex);if(previousIndex<0)break;const previous=rows[previousIndex],endConflict=setTimeValue(previous,"end",current.start,operation,direct);if(endConflict)return endConflict;const start=timeBefore(previous.end,Number(previous.duration||60));const startConflict=setTimeValue(previous,"start",start,operation,direct);if(startConflict)return startConflict;currentIndex=previousIndex;}
+ return null;
 }
-function conflictMessage(row,field){const item=row.content?"「"+row.content+"」":"行程項目",name={start:"開始時間",end:"結束時間",duration:"總時長"}[field];return item+" 的「"+name+"」已經被鎖定，無法被連動覆蓋，請重新確認。";}
+/* 從指定正式行程向下串接，保留各列時長並以 24 小時循環推算結束時間。 */
+function cascadeForward(index,operation,direct){
+ const rows=activeRows();let currentIndex=index;
+ while(currentIndex>=0&&currentIndex<rows.length){const current=rows[currentIndex];if(!current||current.pending)break;const previousIndex=formalIndexBefore(currentIndex);if(previousIndex>=0){const previous=rows[previousIndex];if(!previous.end)break;const startConflict=setTimeValue(current,"start",previous.end,operation,direct);if(startConflict)return startConflict;}
+ if(!current.start)break;const end=timeAfter(current.start,Number(current.duration||60));const endConflict=setTimeValue(current,"end",end,operation,direct);if(endConflict)return endConflict;currentIndex=formalIndexAfter(currentIndex);}
+ return null;
+}
+/* 從指定位置跳過待放置列，向上與向下重新串接正式行程時間鏈。 */
+function cascadeFrom(index,operation,direct){const rows=activeRows(),current=rows[index],usable=!current||current.pending?formalIndexAfter(index):index,seed=usable>=0?usable:formalIndexBefore(index);return seed<0?null:cascadeBackward(seed,operation,direct)||cascadeForward(seed,operation,direct);}
 function formatTime(value){let str=String(value||"").replace(/[^\d:]/g,"");if(!str)return"";let parts=str.includes(":")?str.split(":"):(str.length>2?[str.slice(0,-2),str.slice(-2)]:[str,"0"]);const h=Math.min(23,Math.max(0,Number(parts[0])||0)),m=Math.min(59,Math.max(0,Number(parts[1])||0));return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");}
 function timeToMin(value){const p=String(value||"00:00").split(":");return Number(p[0])*60+Number(p[1]);}
 function minToTime(value){const m=((Math.round(value)%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");}
-function durationBetween(start,end){let d=timeToMin(end)-timeToMin(start);if(d<0)d+=1440;return d||1;}
+/* 從開始時間加上分鐘數，以 24 小時循環回傳 HH:MM。 */
+function timeAfter(start,duration){return minToTime(timeToMin(start)+Number(duration));}
+/* 從結束時間扣除分鐘數，以 24 小時循環回傳 HH:MM。 */
+function timeBefore(end,duration){return minToTime(timeToMin(end)-Number(duration));}
+/* 計算兩個 HH:MM 間的循環時長；跨午夜時會加回 24 小時。 */
+function durationBetween(start,end){const duration=timeToMin(end)-timeToMin(start);return duration>=0?duration:duration+1440;}
 function formatDuration(value){const total=Math.max(1,Number(value)||1),hours=Math.floor(total/60),minutes=total%60;return hours?(hours+"時"+(minutes?minutes+"分":"")):minutes+"分";}
+/* 依修改欄位、相鄰正式行程與本列鎖定欄位列出可用時間調整選項。 */
+function timeOptions(row,index,field){
+ const previous=formalIndexBefore(index)>=0,next=formalIndexAfter(index)>=0,options=[];
+ const add=(key,text,changes,available=true)=>{if(available&&(!row.lock||!changes.includes(row.lock)))options.push({key,text,changes});};
+ if(field==="start"){
+  add("start-all","本行程時長不變，更新前後行程時間",["start","end"]);
+  add("start-previous","本行程結束時間不變，調整本行程時長及上一筆時長",["start","duration"],previous);
+  add("start-up","本行程結束時間不變，調整本行程時長及之前行程時間",["start","duration"]);
+ }else if(field==="end"){
+  add("end-all","本行程時長不變，更新前後行程時間",["start","end"]);
+  add("end-next","本行程開始時間不變，調整本行程時長及下一筆時長",["end","duration"],next);
+  add("end-down","本行程開始時間不變，調整本行程時長及之後行程時間",["end","duration"]);
+ }else{
+  add("duration-previous","本行程結束時間不變，調整本行程開始時間及上一筆時長",["duration","start"],previous);
+  add("duration-next","本行程開始時間不變，調整本行程結束時間及下一筆時長",["duration","end"],next);
+  add("duration-up","本行程結束時間不變，調整本行程開始時間及之前行程時間",["duration","start"]);
+  add("duration-down","本行程開始時間不變，調整本行程結束時間及之後行程時間",["duration","end"]);
+ }return options;
+}
+/* 依使用者選擇的時間調整方式，更新本列與相鄰時間鏈；只在鎖定欄位衝突時停止。 */
+function applyTimeOption(row,index,field,value,key,direct){
+ const operation={"start-all":"更新前後行程時間","start-previous":"調整上一筆時長","start-up":"更新之前行程時間","end-all":"更新前後行程時間","end-next":"調整下一筆時長","end-down":"更新之後行程時間","duration-previous":"調整上一筆時長","duration-next":"調整下一筆時長","duration-up":"更新之前行程時間","duration-down":"更新之後行程時間"}[key];
+ const set=(name,next)=>setTimeValue(row,name,next,operation,direct);
+ let conflict=null;
+ if(key==="start-all"){const end=timeAfter(value,Number(row.duration||60));conflict=set("start",value)||set("end",end)||cascadeFrom(index,operation,direct);}
+ else if(key==="end-all"){const start=timeBefore(value,Number(row.duration||60));conflict=set("end",value)||set("start",start)||cascadeFrom(index,operation,direct);}
+ else if(key==="start-previous"||key==="start-up"){const duration=durationBetween(value,row.end);conflict=set("start",value)||set("duration",duration);if(!conflict){const previous=formalIndexBefore(index);if(key==="start-previous"&&previous>=0){const old=activeRows()[previous];conflict=setTimeValue(old,"end",row.start,operation,direct);if(!conflict)conflict=setTimeValue(old,"duration",durationBetween(old.start,old.end),operation,direct);}else if(key==="start-up")conflict=cascadeBackward(index,operation,direct);}}
+ else if(key==="end-next"||key==="end-down"){const duration=durationBetween(row.start,value);conflict=set("end",value)||set("duration",duration);if(!conflict){const next=formalIndexAfter(index);if(key==="end-next"&&next>=0){const following=activeRows()[next];conflict=setTimeValue(following,"start",row.end,operation,direct);if(!conflict)conflict=setTimeValue(following,"duration",durationBetween(following.start,following.end),operation,direct);}else if(key==="end-down")conflict=cascadeForward(index,operation,direct);}}
+ else if(key==="duration-previous"||key==="duration-up"){const start=timeBefore(row.end,Number(value));conflict=set("duration",value)||set("start",start);if(!conflict){const previous=formalIndexBefore(index);if(key==="duration-previous"&&previous>=0){const old=activeRows()[previous];conflict=setTimeValue(old,"end",row.start,operation,direct);if(!conflict)conflict=setTimeValue(old,"duration",durationBetween(old.start,old.end),operation,direct);}else if(key==="duration-up")conflict=cascadeBackward(index,operation,direct);}}
+ else if(key==="duration-next"||key==="duration-down"){const end=timeAfter(row.start,Number(value));conflict=set("duration",value)||set("end",end);if(!conflict){const next=formalIndexAfter(index);if(key==="duration-next"&&next>=0){const following=activeRows()[next];conflict=setTimeValue(following,"start",row.end,operation,direct);if(!conflict)conflict=setTimeValue(following,"duration",durationBetween(following.start,following.end),operation,direct);}else if(key==="duration-down")conflict=cascadeForward(index,operation,direct);}}
+ return conflict;
+}
+/* 保留直接輸入值與其連動選擇，讓日後重檢可在副本完整重播受影響時間鏈。 */
+function preserveDirectConflict(backup,rowId,field,value,conflict,directContext){state.days[state.activeDate]=backup;const row=activeRows().find(item=>item.id===rowId);if(row)setDirectValue(row,field,value);recordConflict({...conflict,directContext});render();openConflictModal(conflict,true);}
+/* 執行已選時間調整選項；若碰鎖定則保留直接輸入並保存衝突。 */
+function executeTimeOption(row,index,field,value,option,successMessage){const backup=structuredClone(activeRows()),direct={rowId:row.id,field},conflict=applyTimeOption(row,index,field,value,option.key,direct);if(conflict){preserveDirectConflict(backup,row.id,field,value,conflict,{kind:"option",key:option.key,field});return;}clearConflictsAfterSuccess();render();showToast(successMessage||"時間連動已更新");}
+/* 處理正式行程時間欄位輸入，決定首次連動、單一自動選項或選項燈箱。 */
 function handleTimeEdit(id,field,value){
- modifiedRowId=null;modifiedField=null;lockedConflictId=null;
  const row=getRow("day",id);if(!row)return;if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");renderDay();return;}
  const parsed=field==="duration"?Math.max(1,Number(value)||1):formatTime(value),rows=activeRows(),index=rows.indexOf(row),backup=structuredClone(rows);
- if(row.lock&&row.lock!=="none"){
-  row[field]=parsed;
-  let calculatedField="";
-  if(row.lock==="start"){if(field==="end"){row.duration=durationBetween(row.start,row.end);calculatedField="總時長";}else if(field==="duration"){row.end=minToTime(timeToMin(row.start)+Number(row.duration));calculatedField="結束時間";}}
-  else if(row.lock==="end"){if(field==="start"){row.duration=durationBetween(row.start,row.end);calculatedField="總時長";}else if(field==="duration"){row.start=minToTime(timeToMin(row.end)-Number(row.duration));calculatedField="開始時間";}}
-  else if(row.lock==="duration"){if(field==="start"){row.end=minToTime(timeToMin(row.start)+Number(row.duration));calculatedField="結束時間";}else if(field==="end"){row.start=minToTime(timeToMin(row.end)-Number(row.duration));calculatedField="開始時間";}}
-  return finishTimeEdit(row,index,backup,field,calculatedField);
- }
- if(!row.start&&!row.end){row[field]=parsed;if(field==="start"&&row.start){row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"結束時間");}if(field==="end"&&row.end){row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"開始時間");}persist();render();return;}
- if(field==="start"&&!row.end){row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"結束時間");}
- if(field==="end"&&!row.start){row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));return finishTimeEdit(row,index,backup,field,"開始時間");}
- const question=field==="start"?"開始時間已修改，請選擇要推算的欄位。":field==="end"?"結束時間已修改，請選擇要推算的欄位。":"總時長已修改，請選擇要推算的欄位。";
- const options=field==="start"?[
-  {text:"推算結束時間",calculated:"結束時間",cls:"primary",apply:()=>{row.start=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));}},
-  {text:"推算總時長",calculated:"總時長",cls:"secondary",apply:()=>{row.start=parsed;row.duration=durationBetween(row.start,row.end);}}
- ]:field==="end"?[
-  {text:"推算開始時間",calculated:"開始時間",cls:"primary",apply:()=>{row.end=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));}},
-  {text:"推算總時長",calculated:"總時長",cls:"secondary",apply:()=>{row.end=parsed;row.duration=durationBetween(row.start,row.end);}}
- ]:[
-  {text:"推算結束時間",calculated:"結束時間",cls:"primary",apply:()=>{row.duration=parsed;row.end=minToTime(timeToMin(row.start)+Number(row.duration));}},
-  {text:"推算開始時間",calculated:"開始時間",cls:"secondary",apply:()=>{row.duration=parsed;row.start=minToTime(timeToMin(row.end)-Number(row.duration));}}
- ];
- openDialog(question,question,options.map(option=>({text:option.text,cls:option.cls,run:()=>{option.apply();finishTimeEdit(row,index,backup,field,option.calculated);}})).concat([{text:"取消",cls:"secondary",run:()=>renderDay()}]));
+ if(field==="duration"&&(!row.start||!row.end)){row.duration=parsed;clearConflictsAfterSuccess();render();return;}
+ if(!row.start&&!row.end&&(field==="start"||field==="end")){row[field]=parsed;const companion=field==="start"?"end":"start",next=field==="start"?timeAfter(row.start,Number(row.duration||60)):timeBefore(row.end,Number(row.duration||60)),direct={rowId:row.id,field},context={kind:"companion",field,operation:"首次輸入時間"};const ownConflict=setTimeValue(row,companion,next,"首次輸入時間",direct);if(ownConflict)return preserveDirectConflict(backup,row.id,field,parsed,ownConflict,context);const conflict=cascadeFrom(index,"首次輸入時間",direct);if(conflict)return preserveDirectConflict(backup,row.id,field,parsed,conflict,context);clearConflictsAfterSuccess();render();return;}
+ if((field==="start"&&!row.end)||(field==="end"&&!row.start)){row[field]=parsed;const companion=field==="start"?"end":"start",next=field==="start"?timeAfter(row.start,Number(row.duration||60)):timeBefore(row.end,Number(row.duration||60)),direct={rowId:row.id,field},context={kind:"companion",field,operation:"補齊時間"};const ownConflict=setTimeValue(row,companion,next,"補齊時間",direct);if(ownConflict)return preserveDirectConflict(backup,row.id,field,parsed,ownConflict,context);const conflict=cascadeFrom(index,"補齊時間",direct);if(conflict)return preserveDirectConflict(backup,row.id,field,parsed,conflict,context);clearConflictsAfterSuccess();render();return;}
+ const options=timeOptions(row,index,field);if(!options.length){showToast("目前鎖定條件下無法調整此欄位");renderDay();return;}
+ if(options.length===1){const reason=row.lock?"因為本行程的「"+fieldLabel(row.lock)+"」已鎖定，幫您"+options[0].text:"幫您"+options[0].text;return executeTimeOption(row,index,field,parsed,options[0],reason);}
+ const question=(row.lock?"本行程"+fieldLabel(row.lock)+"已鎖定，您希望如何調整？":fieldLabel(field)+"已修改，您希望如何調整？");
+ openDialog(question,question,options.map(option=>({text:option.text,cls:"minor",run:()=>executeTimeOption(row,index,field,parsed,option)})).concat([{text:"取消",cls:"",actionClass:"dialog-cancel",run:()=>renderDay()}]),{dialogClass:"time-option-dialog",actionsClass:"time-option-actions",focusDialog:true});
 }
-function finishTimeEdit(row,index,backup,field,calculatedField){modifiedRowId=row.id;modifiedField=field;const error=cascadeFrom(index);if(error){state.days[state.activeDate]=backup;}else{modifiedRowId=null;modifiedField=null;persist();}render();if(error)openConflictModal(error);else if(calculatedField)showToast(calculatedField+"已修正");}
 
 /* 行程操作：新增、刪除、跨日期待放置與移入暫存。 */
+/* 在第一筆正式行程前新增預設時長行程，必要時以循環時間往前推算。 */
 function addRow(){
  const rows=activeRows(),backup=structuredClone(activeRows()),first=rows.find(r=>!r.pending);let start="",end="";
- if(first&&first.start){end=first.start;start=minToTime(timeToMin(end)-60);}
- const newRow=makeRow(state.activeDate,start,end,60,"","");newRow.isNew=true;rows.unshift(newRow);if(start){const error=cascadeFrom(0);if(error){state.days[state.activeDate]=backup;modifiedRowId=newRow.id;modifiedField=null;render();openConflictModal(error);return;}}persist();render();showToast("已新增行程");
+ if(first&&first.start){end=first.start;start=timeBefore(end,60);}
+ const newRow=makeRow(state.activeDate,start,end,60,"","");newRow.isNew=true;rows.unshift(newRow);if(start){const conflict=cascadeFrom(0,"新增行程");if(conflict){state.days[state.activeDate]=backup;recordConflict(conflict);render();presentOperationConflict(conflict);return;}}clearConflictsAfterSuccess();render();showToast("已新增行程");
 }
+/* 依行程列動作分派刪除、暫存、放置或跨日期移動。 */
 function rowAction(area,id,action){
  const row=getRow(area,id);if(!row)return;
  if(action==="delete")return confirmDeleteRow(area,row);
@@ -186,45 +359,49 @@ function rowAction(area,id,action){
  if(action==="place")placePending(row);
  if(action==="move")chooseDate(target=>moveToDate(area,row,target));
 }
+/* 將正式行程移至暫存並重新串接來源日期，鎖定衝突時完整回復。 */
 function moveRowToStaging(row){
  const list=activeRows(),index=list.indexOf(row);if(index<0)return;
  const backup=structuredClone(list);list.splice(index,1);row.start="";row.end="";row.date="";row.pending=false;row.lock="none";row.isNew=false;state.staging.push(row);
- const error=cascadeFrom(Math.max(0,index-1));if(error){state.staging.pop();state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}
- draggedRow=null;persist();render();showToast("行程已移至共用暫存區");
+ const conflict=cascadeFrom(Math.max(0,index-1),"移至暫存");if(conflict){state.staging.pop();state.days[state.activeDate]=backup;recordConflict(conflict);render();presentOperationConflict(conflict);return;}
+ draggedRow=null;clearConflictsAfterSuccess();render();showToast("行程已移至共用暫存區");
 }
-function moveStagingRowToDay(row,targetId){
+/* 將暫存行程插入目前日期指定列的前後，並維持待放置狀態。 */
+function moveStagingRowToDay(row,targetId,placeAfter=false){
  if(!state.activeDate)return;
  const stagingIndex=state.staging.indexOf(row);if(stagingIndex<0)return;state.staging.splice(stagingIndex,1);
  row.date=state.activeDate;row.pending=true;row.lock="none";row.isNew=false;
- const rows=activeRows(),targetIndex=targetId?rows.findIndex(item=>item.id===targetId):-1;rows.splice(targetIndex<0?rows.length:targetIndex,0,row);
- draggedRow=null;persist();render();showToast("行程已移至 "+dateLabel(state.activeDate)+"，確認位置後按「放置此處」");
+ const rows=activeRows(),targetIndex=targetId?rows.findIndex(item=>item.id===targetId):-1,insertAt=targetIndex<0?rows.length:targetIndex+(placeAfter?1:0);rows.splice(insertAt,0,row);
+ draggedRow=null;clearConflictsAfterSuccess();render();showToast("行程已移至 "+dateLabel(state.activeDate)+"，確認位置後按「放置此處」");
 }
+/* 顯示刪除確認並在正式行程刪除後重新串接時間鏈。 */
 function confirmDeleteRow(area,row){
  const detail=document.createElement("div"),intro=document.createElement("p"),item=document.createElement("div");
  intro.textContent="您確定要刪除以下行程嗎？";item.className="delete-confirm-item";item.textContent=(row.start||"—")+" ~ "+(row.end||"—")+" : "+(row.content||"(無內容)");detail.append(intro,item);
- openDialog("確認刪除行程",detail,[{text:"刪除",cls:"danger",run:()=>{const list=getList(area),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;list.splice(index,1);if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}}persist();render();showToast("行程已刪除，時間自動串聯完成");}},{text:"取消",cls:"secondary"}]);
+ openDialog("確認刪除行程",detail,[{text:"刪除",cls:"danger",run:()=>{const list=getList(area),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;list.splice(index,1);if(area==="day"){const conflict=cascadeFrom(Math.max(0,index-1),"刪除行程");if(conflict){state.days[state.activeDate]=backup;recordConflict(conflict);render();presentOperationConflict(conflict);return;}}clearConflictsAfterSuccess();render();showToast("行程已刪除，時間自動串聯完成");}},{text:"取消",cls:""}]);
 }
-function openConflictModal(message){
- const content=document.createElement("div"),messageLine=document.createElement("p"),hint=document.createElement("p");
- messageLine.className="conflict-message";messageLine.textContent=message;
- hint.className="conflict-hint";hint.textContent="系統已復原至修改前的狀態。黃色欄位是剛剛修改的欄位；紅框列是發生鎖定衝突的行程。";
- content.append(messageLine,hint);openDialog("⚠️ 行程時間衝突警告",content,[{text:"我知道了",cls:"danger",run:()=>{modifiedRowId=null;modifiedField=null;lockedConflictId=null;render();}}]);
-}
+/* 顯示鎖定衝突的所需值與回復結果，關閉後仍保留黃／紅提示。 */
+function openConflictModal(conflict,direct){const locked=getRow("day",conflict.lockedRowId),item=locked&&locked.content?"「"+locked.content+"」":"該行程";const content=document.createElement("div"),messageLine=document.createElement("p"),detail=document.createElement("p"),hint=document.createElement("p");messageLine.className="conflict-message";messageLine.textContent="無法完成「"+conflict.operation+"」："+item+"的「"+fieldLabel(conflict.lockedField)+"」已鎖定。";detail.textContent="此欄目前為 "+(conflict.lockedValue||"空白")+"，要維持時間串接必須改為 "+(conflict.requiredValue||"指定值")+"。";hint.className="conflict-hint";hint.textContent=direct?"已保留您剛輸入的黃色欄位；其餘自動連動已復原。紅框與黃色提示會保留，直到衝突確實解決。":"本次操作已復原；紅框會保留，直到衝突確實解決。";content.append(messageLine,detail,hint);openDialog("⚠️ 行程時間衝突警告",content,[{text:"我知道了",cls:"danger",run:()=>render()}]);}
+/* 以統一鎖定衝突燈箱提示會回復操作的行程動作。 */
+function presentOperationConflict(conflict){openConflictModal(conflict);}
+/* 移出目前日期前先重新串接來源日期；遇鎖定衝突則完整回復移動。 */
 function moveToDate(area,row,targetDate){
  if(!validDate(targetDate))return;
+ const stateBackup=structuredClone(state);
  if(!state.dates.includes(targetDate)){state.dates.push(targetDate);state.days[targetDate]=[];}
  const list=area==="staging"?state.staging:activeRows(),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;if(index>=0)list.splice(index,1);
- if(area==="day"){const error=cascadeFrom(Math.max(0,index-1));if(error){state.days[state.activeDate]=backup;modifiedRowId=null;modifiedField=null;render();openConflictModal(error);return;}}
- row.date=targetDate;row.pending=true;row.lock="none";row.isNew=false;state.days[targetDate].push(row);state.activeDate=targetDate;activeCalendarMonth=calendarMonthFor(targetDate);persist();render();showToast("行程已移至 "+dateLabel(targetDate)+"，確認位置後按「放置此處」");
+ if(area==="day"){const conflict=cascadeFrom(Math.max(0,index-1),"移至其他日期");if(conflict){state=stateBackup;recordConflict(conflict);render();openConflictModal(conflict);return;}}
+ row.date=targetDate;row.pending=true;row.lock="none";row.isNew=false;state.days[targetDate].push(row);state.activeDate=targetDate;activeCalendarMonth=calendarMonthFor(targetDate);clearConflictsAfterSuccess();render();showToast("行程已移至 "+dateLabel(targetDate)+"，確認位置後按「放置此處」");
 }
+/* 將待放置行程接到相鄰正式時間鏈，並以循環時間計算跨午夜結果。 */
 function placePending(row){
  const rows=activeRows(),index=rows.indexOf(row);if(index<0)return;const before=structuredClone(rows);
  const previous=rows.slice(0,index).reverse().find(r=>!r.pending&&r.end),next=rows.slice(index+1).find(r=>!r.pending&&r.start);row.pending=false;
- if(previous){row.start=previous.end;row.end=minToTime(timeToMin(row.start)+Number(row.duration||60));}
- else if(next){row.end=next.start;row.start=minToTime(timeToMin(row.end)-Number(row.duration||60));}
+ if(previous){row.start=previous.end;row.end=timeAfter(row.start,Number(row.duration||60));}
+ else if(next){row.end=next.start;row.start=timeBefore(row.end,Number(row.duration||60));}
  else{row.start="";row.end="";}
- const error=cascadeFrom(index);if(error){state.days[state.activeDate]=before;modifiedRowId=row.id;modifiedField=null;render();openConflictModal(error);return;}
- persist();render();showToast("行程已放置並加入時間連動");
+ const conflict=!row.start&&!row.end?null:cascadeFrom(index,"放置待放置行程");if(conflict){state.days[state.activeDate]=before;recordConflict(conflict);render();openConflictModal(conflict);return;}
+ clearConflictsAfterSuccess();render();showToast("行程已放置並加入時間連動");
 }
 
 /* 日期頁籤與日曆：已有日期可跳轉，空白日期可建立新頁籤。 */
@@ -236,7 +413,7 @@ function renderCalendar(){
  const first=new Date(year,month,1).getDay(),total=new Date(year,month+1,0).getDate();for(let i=0;i<first;i++)grid.appendChild(document.createElement("span"));
  for(let day=1;day<=total;day++){const date=year+"-"+String(month+1).padStart(2,"0")+"-"+String(day).padStart(2,"0"),btn=document.createElement("button");btn.type="button";btn.className="calendar-day "+(state.dates.includes(date)?"has-date":"no-date")+(date===state.activeDate?" selected":"");btn.textContent=day;btn.title=state.dates.includes(date)?"已有日期頁籤":"尚未建立日期";btn.disabled=!calendarCreateMode&&!state.dates.includes(date);btn.addEventListener("click",()=>{if(state.dates.includes(date)){state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();document.getElementById("calendarPopover").hidden=true;}else if(calendarCreateMode)openDateAction(date);});grid.appendChild(btn);}
 }
-function openDateAction(date){openDialog("建立日期頁籤？",dateLabel(date,true)+" 尚未建立行程頁籤。",[{text:"建立並前往",cls:"primary",run:()=>{state.dates.push(date);state.days[date]=[];state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();document.getElementById("calendarPopover").hidden=true;}},{text:"取消",cls:"secondary"}]);}
+function openDateAction(date){openDialog("建立日期頁籤？",dateLabel(date,true)+" 尚未建立行程頁籤。",[{text:"建立並前往",cls:"primary",run:()=>{state.dates.push(date);state.days[date]=[];state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();document.getElementById("calendarPopover").hidden=true;}},{text:"取消",cls:""}]);}
 function chooseDate(callback){
  let month=calendarMonthFor(state.activeDate),selected=state.activeDate||"";
  const content=document.createElement("div");content.className="date-choice";const hint=document.createElement("p");hint.textContent="選擇已有日期，或選擇尚未建立的日期；新日期會自動建立頁籤。";
@@ -245,7 +422,7 @@ function chooseDate(callback){
  const selection=document.createElement("p");selection.className="calendar-selection";
  function draw(){const year=month.getFullYear(),monthIndex=month.getMonth();title.textContent=year+" 年 "+(monthIndex+1)+" 月";grid.innerHTML="";["日","一","二","三","四","五","六"].forEach(d=>{const day=document.createElement("span");day.className="weekday";day.textContent=d;grid.appendChild(day);});const first=new Date(year,monthIndex,1).getDay(),total=new Date(year,monthIndex+1,0).getDate();for(let i=0;i<first;i++)grid.appendChild(document.createElement("span"));for(let day=1;day<=total;day++){const date=year+"-"+String(monthIndex+1).padStart(2,"0")+"-"+String(day).padStart(2,"0"),button=document.createElement("button");button.type="button";button.className="calendar-day "+(state.dates.includes(date)?"has-date":"no-date")+(selected===date?" selected":"");button.textContent=day;button.addEventListener("click",()=>{selected=date;selection.textContent="選取日期："+dateLabel(date,true);draw();});grid.appendChild(button);}selection.textContent=selected?"選取日期："+dateLabel(selected,true):"請選擇日期";}
  prev.addEventListener("click",()=>{month=new Date(month.getFullYear(),month.getMonth()-1,1);draw();});next.addEventListener("click",()=>{month=new Date(month.getFullYear(),month.getMonth()+1,1);draw();});draw();content.append(hint,heading,grid,legend,selection);
- openDialog("移至日期",content,[{text:"移至所選日期",cls:"primary",run:()=>callback(selected)},{text:"取消",cls:"secondary"}]);
+ openDialog("移至日期",content,[{text:"移至所選日期",cls:"primary",run:()=>callback(selected)},{text:"取消",cls:""}]);
 }
 function deleteDate(date=state.activeDate){if(!date)return;askConfirm("刪除日期頁籤","刪除 "+dateLabel(date,true)+" 與這一天的所有行程嗎？此操作無法復原。","刪除此日期",()=>{const idx=state.dates.indexOf(date);state.dates.splice(idx,1);delete state.days[date];if(state.activeDate===date)state.activeDate=state.dates[Math.min(idx,state.dates.length-1)]||"";if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();});}
 
@@ -253,19 +430,24 @@ function deleteDate(date=state.activeDate){if(!date)return;askConfirm("刪除日
 function renderCategories(){const root=document.getElementById("categoryColors");root.innerHTML="";state.categories.forEach(category=>{const label=document.createElement("label");label.className="category-color";const name=document.createElement("span");name.textContent=category.name;const input=document.createElement("input");input.type="color";input.value=category.color;input.setAttribute("aria-label",category.name+" 顏色");input.addEventListener("input",()=>{category.color=input.value;persist();renderDay();renderStaging();});label.append(name,input);root.appendChild(label);});}
 
 /* JSON 匯入匯出保存完整日期、排序、暫存與類別顏色。 */
-function exportJSON(){downloadBlob(new Blob([JSON.stringify({app:"TickBrick",version:1,exportedAt:new Date().toISOString(),data:state},null,2)],{type:"application/json"}),"TickBrick_行程備份_"+todayString()+".json");}
+/* 重檢後回傳是否仍有必須阻擋匯出的未解決時間衝突。 */
+function hasUnresolvedConflicts(){refreshConflicts();return state.conflicts.length>0;}
+/* 無未解決衝突時才匯出包含目前資料與衝突狀態的 JSON 備份。 */
+function exportJSON(){if(hasUnresolvedConflicts()){showToast("請先解決本次衝突再執行匯出");return;}downloadBlob(new Blob([JSON.stringify({app:"TickBrick",version:2,exportedAt:new Date().toISOString(),data:state},null,2)],{type:"application/json"}),"TickBrick_行程備份_"+todayString()+".json");}
 function importJSON(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result),raw=parsed.data||parsed;if(!Array.isArray(raw)&&(!raw||typeof raw!=="object"||!Array.isArray(raw.dates)))throw new Error("format");const imported=normalizeState(raw);askConfirm("匯入並取代現有資料","匯入備份會取代目前所有日期、行程、暫存項目與類別顏色。確定繼續嗎？","取代並匯入",()=>{state=imported;if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();showToast("備份匯入完成");});}catch(error){showToast("無法讀取此 JSON 行程備份");}};reader.readAsText(file,"UTF-8");}
 function todayString(){return new Date().toISOString().slice(0,10);}
 function downloadBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}
 
 /* 先選日期，再輸出每天獨立圖片或 PDF；多檔以 ZIP 下載。 */
+/* 開啟圖片或 PDF 匯出選擇器，並在有未解衝突時停止匯出流程。 */
 function openExportDialog(kind){
+ if(hasUnresolvedConflicts()){showToast("請先解決本次衝突再執行匯出");return;}
  if(!state.dates.length){showToast("請先新增日期頁籤");return;}
  const content=document.createElement("div");content.className="export-options";const all=document.createElement("label");all.className="select-all";all.innerHTML='<input type="checkbox" checked> 選取全部日期';content.appendChild(all);
  const list=document.createElement("div");list.className="export-date-list";state.dates.slice().sort().forEach(date=>{const label=document.createElement("label");label.innerHTML='<input type="checkbox" value="'+date+'" checked> '+esc(dateLabel(date,true));list.appendChild(label);});content.appendChild(list);
  const allInput=all.querySelector("input");let updatePdfMode=()=>{};allInput.addEventListener("change",()=>{list.querySelectorAll("input").forEach(i=>i.checked=allInput.checked);updatePdfMode();});list.addEventListener("change",()=>{allInput.checked=[...list.querySelectorAll("input")].every(i=>i.checked);updatePdfMode();});
  if(kind==="pdf"){const mode=document.createElement("fieldset");mode.className="pdf-mode";mode.innerHTML='<legend>多日期 PDF 方式</legend><label><input type="radio" name="pdfMode" value="merged" checked> 合併成一份 PDF（一天至少一頁） <span class="option-hint" hidden>需選擇至少兩個日期</span></label><label><input type="radio" name="pdfMode" value="separate"> 每天一份 PDF（多份時打包 ZIP）</label>';content.appendChild(mode);updatePdfMode=()=>{const merged=mode.querySelector('input[value="merged"]'),separate=mode.querySelector('input[value="separate"]'),hint=mode.querySelector(".option-hint"),count=list.querySelectorAll("input:checked").length,available=count>=2;merged.disabled=!available;hint.hidden=available;if(!available)separate.checked=true;};updatePdfMode();}
- openDialog(kind==="image"?"匯出圖片":"匯出 PDF",content,[{text:"匯出所選日期",cls:"primary",run:()=>{const dates=[...list.querySelectorAll("input:checked")].map(i=>i.value);if(!dates.length){showToast("至少選擇一個日期");return;}if(kind==="image")exportImages(dates);else exportPdfs(dates,content.querySelector('input[name="pdfMode"]:checked').value);}},{text:"取消",cls:"secondary"}]);
+ openDialog(kind==="image"?"匯出圖片":"匯出 PDF",content,[{text:"匯出所選日期",cls:"primary",run:()=>{const dates=[...list.querySelectorAll("input:checked")].map(i=>i.value);if(!dates.length){showToast("至少選擇一個日期");return;}if(kind==="image")exportImages(dates);else exportPdfs(dates,content.querySelector('input[name="pdfMode"]:checked').value);}},{text:"取消",cls:""}]);
 }
 function exportImages(dates){const files=dates.map(date=>({name:date+".png",data:dataUrlBytes(renderScheduleCanvas(date).toDataURL("image/png"))}));if(files.length===1)downloadBlob(new Blob([files[0].data],{type:"image/png"}),files[0].name);else downloadBlob(zipFiles(files),"TickBrick_圖片_"+dates[0]+"_"+dates[dates.length-1]+".zip");}
 function exportPdfs(dates,mode){const ordered=dates.slice().sort();if(mode==="merged"){downloadBlob(buildPdf(ordered),"TickBrick_"+ordered[0]+"_"+ordered[ordered.length-1]+".pdf");return;}const files=ordered.map(date=>({name:date+".pdf",blob:buildPdf([date])}));if(files.length===1)downloadBlob(files[0].blob,files[0].name);else Promise.all(files.map(async f=>({name:f.name,data:new Uint8Array(await f.blob.arrayBuffer())}))).then(data=>downloadBlob(zipFiles(data),"TickBrick_PDF_"+ordered[0]+"_"+ordered[ordered.length-1]+".zip"));}
@@ -308,12 +490,12 @@ function zipFiles(files){
  const size=central.reduce((n,b)=>n+b.length,0),end=new Uint8Array(22),dv=new DataView(end.buffer);dv.setUint32(0,0x06054b50,true);dv.setUint16(8,files.length,true);dv.setUint16(10,files.length,true);dv.setUint32(12,size,true);dv.setUint32(16,offset,true);return new Blob([...parts,...central,end],{type:"application/zip"});
 }
 
-/* 共用確認視窗。 */
-function openDialog(title,content,actions){
- const dialog=document.getElementById("appDialog");document.getElementById("dialogTitle").textContent=title;const target=document.getElementById("dialogContent");target.replaceChildren();if(typeof content==="string")target.textContent=content;else target.appendChild(content);
- const buttons=document.getElementById("dialogActions");buttons.replaceChildren();actions.forEach(action=>{const button=document.createElement("button");button.type="button";button.className="button "+(action.cls||"secondary");button.textContent=action.text;button.addEventListener("click",()=>{dialog.close();if(action.run)action.run();});buttons.appendChild(button);});dialog.showModal();
+/* 建立共用對話框，並依選用設定套用專用排列與初始鍵盤焦點。 */
+function openDialog(title,content,actions,options={}){
+ const dialog=document.getElementById("appDialog");dialog.className="app-dialog"+(options.dialogClass?" "+options.dialogClass:"");dialog.toggleAttribute("tabindex",Boolean(options.focusDialog));document.getElementById("dialogTitle").textContent=title;const target=document.getElementById("dialogContent");target.replaceChildren();if(typeof content==="string")target.textContent=content;else target.appendChild(content);
+ const buttons=document.getElementById("dialogActions");buttons.className="dialog-actions"+(options.actionsClass?" "+options.actionsClass:"");buttons.replaceChildren();actions.forEach(action=>{const button=document.createElement("button");button.type="button";button.className="button"+(action.cls?" "+action.cls:"")+(action.actionClass?" "+action.actionClass:"");button.textContent=action.text;button.addEventListener("click",()=>{dialog.close();if(action.run)action.run();});buttons.appendChild(button);});dialog.showModal();if(options.focusDialog)dialog.focus();
 }
-function askConfirm(title,message,confirmText,onConfirm){openDialog(title,message,[{text:confirmText,cls:"danger",run:onConfirm},{text:"取消",cls:"secondary"}]);}
+function askConfirm(title,message,confirmText,onConfirm){openDialog(title,message,[{text:confirmText,cls:"danger",run:onConfirm},{text:"取消",cls:""}]);}
 
 /* 連接畫面事件並首次繪製。 */
 document.getElementById("addRowButton").addEventListener("click",addRow);
