@@ -1,7 +1,7 @@
 /* 行程資料以日期分頁，並保存到目前瀏覽器的 localStorage。 */
 const STORAGE_KEY = "tickbrick_trip_v1";
 const LEGACY_KEY = "hokkaido_itinerary_v47";
-const DEFAULT_CATEGORIES = [{name:"交通",color:"#E3F2FD"},{name:"逛街",color:"#FFFFFF"},{name:"景點",color:"#E8F5E9"},{name:"用餐",color:"#FFF3E0"}];
+const DEFAULT_CATEGORIES = [{name:"交通",color:"#b2dfff"},{name:"逛街",color:"#ffa7b1"},{name:"景點",color:"#befeb0"},{name:"用餐",color:"#f9f999"}];
 const INITIAL_ROWS = [
  ["06:30","07:30",60,"交通","➔ 桃園機場"],["07:30","09:30",120,"","辦理登機通關"],["09:30","13:05",215,"","Flight to SAPPORO (長榮 BR 116)"],
  ["13:05","14:30",85,"","抵達新千歲機場，辦理入境通關與提取行李"],["14:30","15:30",60,"交通","機場 ➔ 旅館（HELIO HOSTEL）"],
@@ -274,10 +274,10 @@ function renderScheduleCanvas(date,rowSubset,continuation){
  const canvas=document.createElement("canvas");canvas.width=1240;canvas.height=Math.max(1754,261+contentHeight+70);const ctx=canvas.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
  ctx.fillStyle="#263746";ctx.font="bold 44px sans-serif";ctx.fillText("行程樂高",80,100);ctx.font="28px sans-serif";ctx.fillStyle="#555";ctx.fillText(dateLabel(date,true)+(continuation?"（續）":""),80,150);
  let y=205;const left=70,w1=240,w2=240;ctx.fillStyle="#2c3e50";ctx.fillRect(left,y,1100,56);ctx.fillStyle="#fff";ctx.font="bold 23px sans-serif";ctx.fillText("時間／時長",left+14,y+37);ctx.fillText("類別",left+w1+14,y+37);ctx.fillText("行程內容",left+w1+w2+14,y+37);y+=56;
- prepared.forEach(({row,lines,height})=>{ctx.fillStyle=row.pending?"#fff7dd":"#fff";ctx.fillRect(left,y,1100,height);ctx.strokeStyle="#d9dee4";ctx.strokeRect(left,y,1100,height);
+ prepared.forEach(({row,lines,height})=>{ctx.fillStyle=row.pending?"#fcffc2":"#fff";ctx.fillRect(left,y,1100,height);ctx.strokeStyle="#d9dee4";ctx.strokeRect(left,y,1100,height);
   ctx.fillStyle="#222";ctx.font="26px sans-serif";ctx.fillText(row.start&&row.end?row.start+"–"+row.end:"—",left+14,y+38);ctx.font="20px sans-serif";ctx.fillStyle="#666";ctx.fillText(formatDuration(row.duration),left+14,y+68);
   ctx.fillStyle=(state.categories.find(c=>c.name===row.category)||{}).color||"#fff";ctx.fillRect(left+w1+8,y+10,110,height-20);ctx.fillStyle="#222";ctx.font="22px sans-serif";ctx.fillText(row.category||"",left+w1+15,y+42);
-  ctx.fillStyle="#222";ctx.font="26px sans-serif";lines.forEach((line,i)=>ctx.fillText(line,left+w1+w2+14,y+38+i*38));if(row.pending){ctx.fillStyle="#9a6700";ctx.font="18px sans-serif";ctx.fillText("待放置",left+1000,y+30);}y+=height;});return canvas;
+  ctx.fillStyle="#222";ctx.font="26px sans-serif";lines.forEach((line,i)=>ctx.fillText(line,left+w1+w2+14,y+38+i*38));if(row.pending){ctx.fillStyle="#826709";ctx.font="18px sans-serif";ctx.fillText("待放置",left+1000,y+30);}y+=height;});return canvas;
 }
 function wrapText(ctx,text,size,width){ctx.font=size+"px sans-serif";const lines=[];let line="";for(const char of text){if(ctx.measureText(line+char).width>width&&line){lines.push(line);line=char;}else line+=char;}if(line||!lines.length)lines.push(line);return lines;}
 function dataUrlBlob(url){const bytes=atob(url.split(",")[1]),arr=new Uint8Array(bytes.length);for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);return new Blob([arr],{type:"image/png"});}

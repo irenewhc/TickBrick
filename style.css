@@ -1,14 +1,14 @@
 /* 基礎設定：字型、色彩變數與全域版面 */
 :root {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    color: #293645;
+    color: var(--color-purple-950);
     background: #f3f5f8;
     font-synthesis: none;
 
     /* 綠色系 (Mint / Green) */ 
     --color-mint-light: #C2F0D5;
-    --color-mint: #91E4B4; 
-    --color-mint-bg: #ddf8e8;
+    /* --color-mint: #91E4B4;  */
+    --color-mint-bg: #e3f8eb;
 
     /* 黃色系 (Yellow) */
     --color-yellow: #FFF200;
@@ -18,13 +18,19 @@
     --color-red: #FF5252;
     --color-pink-light: #ffe1e1;
 
-    /* 深綠色 (Dark Green / Neutral) */
-    --color-dark-slate: #2C3E35;
-    --color-gray-light: #dee9e2;
+    /* 灰色 (Gray) */
+    --color-gray: #e6e6e6;
+    --color-gray-light: #f6f6f6;
+    --color-gray-heavy: #7F7F7F;
 
-    /* 橄欖綠 / 綠黃色系 (Olive / Lime) */
-    --color-olive: #87A330;
-    --color-lime-light: #deeaac;
+    /* 藍紫色 (Purple) */
+    --color-purple-300: #b0bef1;
+    --color-purple-200: #ced8f7;
+    --color-purple-700: #4e4ab8;
+    --color-purple-800: #3D3B8E;
+    --color-purple-900: #383877;
+    --color-purple-950: #222145;
+
 
 }
 
@@ -63,13 +69,13 @@ select {
 
 h1 {
     font-size: 30px;
-    color: var(--color-dark-slate);
+    color: var(--color-purple-950);
     margin: 0 0 5px;
 }
 
 .subtitle {
     margin: 0;
-    color: var(--color-dark-slate);
+    color: var(--color-purple-950);
 }
 
 .header-actions {
@@ -89,7 +95,7 @@ h1 {
     font-weight: 500;
     cursor: pointer;
     transition: background .15s, transform .15s;
-    color: var(--color-dark-slate);
+    color: var(--color-purple-950);
     background-color: #e6e6e6;
 }
 
@@ -198,12 +204,12 @@ h1 {
     left: 12px;
     right: 8px;
     height: 3px;
-    background: var(--color-dark-slate);
+    background: var(--color-purple-900);
     border-radius: 4px 4px 0 0
 }
 
 .date-tab.active .date-tab-select {
-    color: var(--color-dark-slate);
+    color: var(--color-purple-900);
     background: var(--color-mint-bg);
     font-weight: 700;
 }
@@ -220,7 +226,7 @@ h1 {
 
 .date-tab.active .date-tab-close {
     background: var(--color-mint-bg);
-    color: var(--color-dark-slate);
+    color: var(--color-purple-900);
 }
 
 .date-tab-close:hover,
@@ -250,7 +256,7 @@ h1 {
     bottom: 5px;
     width: 4px;
     border-radius: 4px;
-    background: #5662e9;
+    background: var(--color-purple-700);
     box-shadow: 0 0 0 2px #eef0ff;
     pointer-events: none
 }
@@ -272,20 +278,22 @@ h1 {
     list-style: none;
     border-radius: 8px;
     padding: 10px 15px;
-    font-weight: 650;
+    font-weight: 500;
     cursor: pointer;
-    color: #596675;
-    background: #edf0f4;
-    transition: background .15s, transform .15s
+    color: var(--color-purple-950);
+    background: var(--color-gray);
+    transition: background .15s, transform .15s;
+    font-size: 14px;
+    border: 1px solid var(--color-gray);
 }
 
 .export-menu summary::-webkit-details-marker {
-    display: none
+    display: none;
 }
 
 .export-menu summary:hover {
     filter: brightness(.97);
-    transform: translateY(-1px)
+    transform: translateY(-3px);
 }
 
 .export-menu-list {
@@ -294,23 +302,22 @@ h1 {
     top: calc(100% + 7px);
     z-index: 11;
     display: grid;
-    gap: 7px;
+    gap: 12px;
     min-width: 174px;
-    padding: 9px;
+    padding: 16px;
     background: #fff;
-    border: 1px solid #dfe4eb;
-    border-radius: 10px;
-    box-shadow: 0 12px 32px #24344724
+    border: 1px solid var(--color-gray-light);
+    border-radius: 12px;
+    box-shadow: 0 50px 50px #24344724;
 }
 
 .export-menu-list .button {
-    text-align: left;
-    white-space: nowrap
+    white-space: nowrap;
 }
 
 /* 行程區段與表格基礎 */
 .day-section {
-    margin-bottom: 32px
+    margin-bottom: 32px;
 }
 
 .section-heading {
@@ -324,19 +331,19 @@ h1 {
 .section-heading h2 {
     font-size: 19px;
     margin: 0 0 4px;
-    color: #334455
+    color: var(--color-purple-900);
 }
 
 .section-heading p {
     font-size: 13px;
-    color: #7a8692;
+    color: var(--color-gray-heavy);
     margin: 0
 }
 
 .table-wrap {
     overflow-x: auto;
     border: 1px solid #e2e6eb;
-    border-radius: 10px
+    border-radius: 10px;
 }
 
 table {
@@ -346,7 +353,7 @@ table {
 }
 
 th {
-    background: #2c3e50;
+    background: #222145;
     color: #fff;
     font-size: 13px;
     font-weight: 650;
@@ -397,7 +404,7 @@ td {
 }
 
 .schedule-row.drag-over {
-    box-shadow: inset 0 3px #5662e9
+    box-shadow: inset 0 3px var(--color-purple-700);
 }
 
 .schedule-row.row-dragging {
@@ -405,11 +412,11 @@ td {
 }
 
 .schedule-row.pending-row {
-    background: #fff8df
+    background: var(--color-yellow-light);
 }
 
 .schedule-row.new-row-highlight {
-    background: #e9f49d
+    background: var(--color-purple-200);
 }
 
 .schedule-row.conflict-highlight {
@@ -514,7 +521,7 @@ select {
     border: 1px solid #d6dce3;
     border-radius: 6px;
     padding: 6px;
-    color: #303c47;
+    color: var(--color-purple-900);
     background: white
 }
 
@@ -581,14 +588,14 @@ select {
 }
 
 .staging-section.drop-target {
-    border-color: #5662e9;
+    border-color: var();
     background: #eef0ff;
     box-shadow: 0 0 0 3px #5662e929
 }
 
 .section-heading .staging-drop-hint {
     margin-top: 5px;
-    color: var(--color-dark-slate);
+    color: var(--color-purple-900);
     font-weight: 650
 }
 
@@ -597,7 +604,7 @@ select {
 }
 
 .staging-section th {
-    background: #566578
+    background: var(--color-purple-900)
 }
 
 .count-badge {
@@ -617,8 +624,8 @@ select {
 
 .category-settings summary {
     cursor: pointer;
-    color: #596675;
-    font-weight: 650
+    color: var(--color-purple-900);
+    font-weight: 650;
 }
 
 .category-color-list {
@@ -698,21 +705,21 @@ select {
 .calendar-day.has-date {
     background: var(--color-pink-light);
     color: var(--color-red);
-    font-weight: 700
+    font-weight: 700;
 }
 
 .calendar-day.selected {
-    outline: 2px solid #5a63e8;
-    outline-offset: 1px
+    outline: 2px solid var(--color-purple-700);
+    outline-offset: 1px;
 }
 
 .calendar-day:disabled {
     cursor: not-allowed;
-    opacity: .56
+    opacity: .56;
 }
 
 .calendar-day:hover {
-    border-color: #6470ed
+    border-color: var(--color-purple-700);
 }
 
 .calendar-legend {
@@ -733,7 +740,7 @@ select {
     width: 11px;
     height: 11px;
     border-radius: 3px;
-    background: #e4f3ea
+    background: var(--color-pink-light);
 }
 
 .calendar-legend .legend-none {
@@ -747,7 +754,7 @@ select {
     border-radius: 14px;
     padding: 24px;
     box-shadow: 0 22px 70px #1c2a3b38;
-    color: #344252
+    color: var(--color-purple-950);
 }
 
 .app-dialog::backdrop {
@@ -792,13 +799,13 @@ select {
     padding: 8px 10px;
     border-radius: 6px;
     background: #ecf0f1;
-    color: #2c3e50;
+    color: var(--color-purple-950);
     font-weight: 700;
     line-height: 1.5
 }
 
 .conflict-message {
-    color: #c0392b;
+    color: var(--color-red);
     font-weight: 700
 }
 
@@ -838,7 +845,7 @@ select {
 .export-date-list input,
 .pdf-mode input,
 .select-all input {
-    accent-color: #545fe7
+    accent-color: var(--color-purple-700);
 }
 
 .pdf-mode {
@@ -873,8 +880,8 @@ select {
     transform: translate(-50%, 15px);
     opacity: 0;
     pointer-events: none;
-    background: #243746;
-    color: white;
+    background: var(--color-purple-200);
+    color: var(--color-purple-900);
     padding: 11px 18px;
     border-radius: 9px;
     box-shadow: 0 7px 22px #1e2b3b2a;
