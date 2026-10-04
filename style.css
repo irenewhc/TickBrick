@@ -12,6 +12,7 @@
 
     /* 黃色系 (Yellow) */
     --color-yellow: #FFF200;
+    --color-yellow-hover: #cab300;
     --color-yellow-light: #feffe7;
 
     /* 紅色系 (Red / Pink) */
@@ -89,52 +90,71 @@ h1 {
 }
 
 .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     border: 0;
     border-radius: 8px;
-    padding: 10px 16px;
+    padding: 12px 16px;
+    font-size: 14px;
     font-weight: 500;
+    line-height: 1.5;
     cursor: pointer;
-    transition: background .15s, transform .15s;
+    transition: background-color .15s, box-shadow .15s, filter .15s, transform .15s;
     color: var(--color-purple-950);
-    background-color: #e6e6e6;
+    background-color: var(--color-gray);
 }
 
-.button:hover {
-    filter: brightness(.97);
+.button:hover:not(:disabled) {
+    filter: brightness(.96);
     transform: translateY(-3px)
 }
 
-#calendarToggle:hover {
-    filter: none
+.button:active:not(:disabled) {
+    filter: brightness(.96);
+    transform: translateY(0)
 }
 
 .button:disabled {
     opacity: .45;
     cursor: not-allowed;
+    filter: none;
     transform: none
 }
 
+.button:focus-visible {
+    outline: 2px solid var(--color-purple-700);
+    outline-offset: 2px
+}
+
 .button.primary {
-    background: var(--color-yellow);
-    border: 2px solid var(--color-yellow);
+    background-color: var(--color-yellow);
+}
+
+.button.primary:hover:not(:disabled),
+.button.primary:active:not(:disabled) {
+    filter: brightness(.96)
 }
 
 .button.minor {
-    background: white;
-    border: 2px solid var(--color-yellow);
+    background-color: white;
+    box-shadow: inset 0 0 0 2px var(--color-yellow);
 }
 
-.button.secondary {
-    /* background: white; */
+.button.minor:hover:not(:disabled),
+.button.minor:active:not(:disabled) {
+    box-shadow: inset 0 0 0 2px var(--color-yellow-hover);
+    filter: none
 }
 
 .button.danger {
-    background: var(--color-red);
+    background-color: var(--color-red);
     color: white
 }
 
 .button.small {
-    padding: 7px 9px;
+    padding: 8px 12px;
     font-size: 12px;
     white-space: nowrap
 }
@@ -236,7 +256,8 @@ h1 {
 }
 
 .date-tab[draggable=true] {
-    cursor: grab
+    cursor: grab;
+    touch-action: none
 }
 
 .date-tab:active {
@@ -407,6 +428,32 @@ td {
     box-shadow: inset 0 3px var(--color-purple-700);
 }
 
+.schedule-row.touch-drop-before,
+.schedule-row.touch-drop-after {
+    position: relative
+}
+
+.schedule-row.touch-drop-before::before,
+.schedule-row.touch-drop-after::after {
+    content: "";
+    position: absolute;
+    z-index: 3;
+    left: 7px;
+    right: 7px;
+    height: 3px;
+    border-radius: 4px;
+    background: var(--color-purple-700);
+    pointer-events: none
+}
+
+.schedule-row.touch-drop-before::before {
+    top: -2px
+}
+
+.schedule-row.touch-drop-after::after {
+    bottom: -2px
+}
+
 .schedule-row.row-dragging {
     opacity: .42
 }
@@ -452,6 +499,33 @@ td {
     font-size: 23px;
     line-height: 1;
     user-select: none
+}
+
+.order-cell {
+    touch-action: none
+}
+
+.touch-drag-preview {
+    position: fixed;
+    z-index: 20;
+    top: 0;
+    left: 0;
+    opacity: .78;
+    pointer-events: none;
+    filter: drop-shadow(0 6px 10px color-mix(in srgb, var(--color-purple-950) 20%, transparent));
+    transform: translate(-9999px, -9999px)
+}
+
+.touch-drag-preview table {
+    width: 100%;
+    min-width: 0;
+    border-collapse: collapse;
+    background: #fff
+}
+
+.touch-drag-preview .date-tab {
+    width: 100%;
+    background: #fff
 }
 
 .pending-tag {
@@ -574,8 +648,8 @@ select {
 }
 
 .empty-state.drag-over {
-    box-shadow: inset 0 0 0 3px #5662e9;
-    background: #eef0ff
+    box-shadow: inset 0 0 0 3px var(--color-purple-700);
+    background: var(--color-purple-200)
 }
 
 .staging-section {
@@ -588,9 +662,9 @@ select {
 }
 
 .staging-section.drop-target {
-    border-color: var();
-    background: #eef0ff;
-    box-shadow: 0 0 0 3px #5662e929
+    border-color: var(--color-purple-700);
+    background: var(--color-purple-200);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-purple-700) 16%, transparent)
 }
 
 .section-heading .staging-drop-hint {
@@ -782,6 +856,26 @@ select {
     margin-top: 22px
 }
 
+/* 時間連動選項：選項靠左依內容寬度排列，取消獨立靠右。 */
+.dialog-actions.time-option-actions {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: flex-start
+}
+
+.dialog-actions.time-option-actions .button {
+    align-self: flex-start;
+    flex: 0 0 auto;
+    justify-content: flex-start;
+    max-width: 100%;
+    text-align: left
+}
+
+.dialog-actions.time-option-actions .dialog-cancel {
+    align-self: flex-end;
+    margin-top: 9px
+}
+
 .date-choice {
     display: grid;
     gap: 10px
@@ -925,7 +1019,11 @@ select {
         flex: 1
     }
 
-    .header-actions .button,
+    .header-actions .button {
+        width: 100%;
+        text-align: center
+    }
+
     .export-menu summary {
         font-size: 12px;
         padding: 9px;
