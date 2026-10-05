@@ -679,7 +679,7 @@ select {
 .section-heading .staging-drop-hint {
     margin-top: 5px;
     color: var(--color-purple-900);
-    font-weight: 650
+    /* font-weight: 650 */
 }
 
 .staging-section .section-heading {
