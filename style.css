@@ -1,6 +1,6 @@
 /* 基礎設定：字型、色彩變數與全域版面 */
 :root {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family:  "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: var(--color-purple-950);
     background: #f3f5f8;
     font-synthesis: none;
@@ -34,12 +34,11 @@
     --color-purple-800: #3D3B8E;
     --color-purple-900: #383877;
     --color-purple-950: #222145;
-
-
 }
 
 * {
-    box-sizing: border-box
+    box-sizing: border-box;
+    letter-spacing: 3%;
 }
 
 body {
@@ -301,14 +300,14 @@ h1 {
 .export-menu summary {
     list-style: none;
     border-radius: 8px;
-    padding: 10px 15px;
+    padding: 12px 16px;
     font-weight: 500;
     cursor: pointer;
     color: var(--color-purple-950);
     background: var(--color-gray);
     transition: background .15s, transform .15s;
     font-size: 14px;
-    border: 1px solid var(--color-gray);
+    line-height: 1.5;
 }
 
 .export-menu summary::-webkit-details-marker {
@@ -611,6 +610,10 @@ select {
 .category-select {
     width: 100%;
     min-height: 34px
+}
+
+.category-select option {
+    background-color: white;
 }
 
 .content-input {
