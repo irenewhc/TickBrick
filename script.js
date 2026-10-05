@@ -1,7 +1,7 @@
 /* 行程資料以日期分頁，並保存到目前瀏覽器的 localStorage。 */
 const STORAGE_KEY = "tickbrick_trip_v1";
 const LEGACY_KEY = "hokkaido_itinerary_v47";
-const DEFAULT_CATEGORIES = [{name:"交通",color:"#e3f8eb"},{name:"逛街",color:"#ffe1e1"},{name:"景點",color:"#e4eafb"},{name:"用餐",color:"#fcffc2"},,{name:"其他",color:"#e6e6e6"}];
+const DEFAULT_CATEGORIES = [{name:"交通",color:"#e3f8eb"},{name:"逛街",color:"#ffe1e1"},{name:"景點",color:"#e4eafb"},{name:"用餐",color:"#fcffc2"},{name:"其他",color:"#e6e6e6"}];
 const INITIAL_ROWS = [
  ["06:30","07:30",60,"交通","➔ 桃園機場"],["07:30","09:30",120,"","辦理登機通關"],["09:30","13:05",215,"","Flight to SAPPORO (長榮 BR 116)"],
  ["13:05","14:30",85,"","抵達新千歲機場，辦理入境通關與提取行李"],["14:30","15:30",60,"交通","機場 ➔ 旅館（HELIO HOSTEL）"],
@@ -11,6 +11,7 @@ const INITIAL_ROWS = [
 let state=loadState();
 let activeCalendarMonth=state.activeDate?calendarMonthFor(state.activeDate):new Date(2026,9,1);
 let draggedRow=null, autosaveTimer, calendarCreateMode=false, touchDrag=null, touchCandidate=null, touchClickUntil=0;
+let exportLogoPromise, exportLogoFallbackNotified=false;
 
 /* 建立含未解決衝突欄位的空白應用程式狀態。 */
 function blankState(){return{version:2,dates:[],activeDate:"",days:{},staging:[],categories:DEFAULT_CATEGORIES.map(x=>({...x})),conflicts:[]};}
@@ -448,14 +449,28 @@ function openExportDialog(kind){
  const list=document.createElement("div");list.className="export-date-list";state.dates.slice().sort().forEach(date=>{const label=document.createElement("label");label.innerHTML='<input type="checkbox" value="'+date+'" checked> '+esc(dateLabel(date,true));list.appendChild(label);});content.appendChild(list);
  const allInput=all.querySelector("input");let updatePdfMode=()=>{};allInput.addEventListener("change",()=>{list.querySelectorAll("input").forEach(i=>i.checked=allInput.checked);updatePdfMode();});list.addEventListener("change",()=>{allInput.checked=[...list.querySelectorAll("input")].every(i=>i.checked);updatePdfMode();});
  if(kind==="pdf"){const mode=document.createElement("fieldset");mode.className="pdf-mode";mode.innerHTML='<legend>多日期 PDF 方式</legend><label><input type="radio" name="pdfMode" value="merged" checked> 合併成一份 PDF（一天至少一頁） <span class="option-hint" hidden>需選擇至少兩個日期</span></label><label><input type="radio" name="pdfMode" value="separate"> 每天一份 PDF（多份時打包 ZIP）</label>';content.appendChild(mode);updatePdfMode=()=>{const merged=mode.querySelector('input[value="merged"]'),separate=mode.querySelector('input[value="separate"]'),hint=mode.querySelector(".option-hint"),count=list.querySelectorAll("input:checked").length,available=count>=2;merged.disabled=!available;hint.hidden=available;if(!available)separate.checked=true;};updatePdfMode();}
- openDialog(kind==="image"?"匯出圖片":"匯出 PDF",content,[{text:"匯出所選日期",cls:"primary",run:()=>{const dates=[...list.querySelectorAll("input:checked")].map(i=>i.value);if(!dates.length){showToast("至少選擇一個日期");return;}if(kind==="image")exportImages(dates);else exportPdfs(dates,content.querySelector('input[name="pdfMode"]:checked').value);}},{text:"取消",cls:""}]);
+ openDialog(kind==="image"?"匯出圖片":"匯出 PDF",content,[{text:"匯出所選日期",cls:"primary",run:async()=>{const dates=[...list.querySelectorAll("input:checked")].map(i=>i.value);if(!dates.length){showToast("至少選擇一個日期");return;}try{if(kind==="image")await exportImages(dates);else await exportPdfs(dates,content.querySelector('input[name="pdfMode"]:checked').value);}catch(error){console.error("匯出失敗",error);showToast("匯出失敗，請稍後再試");}}},{text:"取消",cls:""}]);
 }
-function exportImages(dates){const files=dates.map(date=>({name:date+".png",data:dataUrlBytes(renderScheduleCanvas(date).toDataURL("image/png"))}));if(files.length===1)downloadBlob(new Blob([files[0].data],{type:"image/png"}),files[0].name);else downloadBlob(zipFiles(files),"TickBrick_圖片_"+dates[0]+"_"+dates[dates.length-1]+".zip");}
-function exportPdfs(dates,mode){const ordered=dates.slice().sort();if(mode==="merged"){downloadBlob(buildPdf(ordered),"TickBrick_"+ordered[0]+"_"+ordered[ordered.length-1]+".pdf");return;}const files=ordered.map(date=>({name:date+".pdf",blob:buildPdf([date])}));if(files.length===1)downloadBlob(files[0].blob,files[0].name);else Promise.all(files.map(async f=>({name:f.name,data:new Uint8Array(await f.blob.arrayBuffer())}))).then(data=>downloadBlob(zipFiles(data),"TickBrick_PDF_"+ordered[0]+"_"+ordered[ordered.length-1]+".zip"));}
-function renderScheduleCanvas(date,rowSubset,continuation){
+/* 載入並快取匯出專用 LOGO；失敗時清除 Promise，讓下次匯出能以同站絕對 URL 重試。 */
+function loadExportLogo(){
+ if(!exportLogoPromise){
+  const source=new URL("LOGO_橫.png",document.baseURI).href;
+  exportLogoPromise=new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error("匯出 LOGO 載入失敗"));image.src=source;});
+  exportLogoPromise.catch(()=>{exportLogoPromise=undefined;});
+ }
+ return exportLogoPromise;
+}
+/* 依所選日期建立 PNG 所需畫布；LOGO 不可用時仍以文字備援完成匯出。 */
+async function exportImages(dates){exportLogoFallbackNotified=false;const files=await Promise.all(dates.map(async date=>{const canvas=await renderScheduleCanvas(date);return{name:date+".png",data:dataUrlBytes(canvas.toDataURL("image/png"))};}));if(files.length===1)downloadBlob(new Blob([files[0].data],{type:"image/png"}),files[0].name);else downloadBlob(zipFiles(files),"TickBrick_圖片_"+dates[0]+"_"+dates[dates.length-1]+".zip");}
+/* 依選擇產生合併或分日 PDF；各頁以 LOGO 或文字備援繪製後再轉為影像。 */
+async function exportPdfs(dates,mode){exportLogoFallbackNotified=false;const ordered=dates.slice().sort();if(mode==="merged"){downloadBlob(await buildPdf(ordered),"TickBrick_"+ordered[0]+"_"+ordered[ordered.length-1]+".pdf");return;}const files=await Promise.all(ordered.map(async date=>({name:date+".pdf",blob:await buildPdf([date])})));if(files.length===1)downloadBlob(files[0].blob,files[0].name);else downloadBlob(zipFiles(await Promise.all(files.map(async f=>({name:f.name,data:new Uint8Array(await f.blob.arrayBuffer())})))),"TickBrick_PDF_"+ordered[0]+"_"+ordered[ordered.length-1]+".zip");}
+/* 以已載入的匯出 LOGO 或「行程樂高 TickBrick」文字建立單日或 PDF 續頁畫布。 */
+async function renderScheduleCanvas(date,rowSubset,continuation){
  const rows=rowSubset||(state.days[date]||[]).filter(row=>!row.pending),measure=document.createElement("canvas").getContext("2d"),prepared=rows.map(row=>{const lines=wrapText(measure,row.content||"",28,520);return{row,lines,height:Math.max(90,lines.length*38+30)};}),contentHeight=prepared.reduce((sum,item)=>sum+item.height,0);
  const canvas=document.createElement("canvas");canvas.width=1240;canvas.height=Math.max(1754,261+contentHeight+70);const ctx=canvas.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
- ctx.fillStyle="#263746";ctx.font="bold 44px sans-serif";ctx.fillText("行程樂高",80,100);ctx.font="28px sans-serif";ctx.fillStyle="#555";ctx.fillText(dateLabel(date,true)+(continuation?"（續）":""),80,150);
+ const logoX=80,logoY=40,logoVisibleHeight=60,logoDateGap=30,logoVisibleWidth=907/264*logoVisibleHeight,dateY=logoY+logoVisibleHeight+logoDateGap+28;
+ try{const logo=await loadExportLogo();ctx.drawImage(logo,35,37,907,264,logoX,logoY,logoVisibleWidth,logoVisibleHeight);}catch(error){console.warn("匯出 LOGO 載入失敗，改用文字備援",error);ctx.font="bold 38px sans-serif";ctx.fillStyle="#2c3e50";ctx.fillText("行程樂高 TickBrick",logoX,logoY+45);if(!exportLogoFallbackNotified){exportLogoFallbackNotified=true;showToast("匯出 LOGO 無法載入，已改用文字備援");}}
+ ctx.font="28px sans-serif";ctx.fillStyle="#555";ctx.fillText(dateLabel(date,true)+(continuation?"（續）":""),logoX,dateY);
  let y=205;const left=70,w1=240,w2=240;ctx.fillStyle="#2c3e50";ctx.fillRect(left,y,1100,56);ctx.fillStyle="#fff";ctx.font="bold 23px sans-serif";ctx.fillText("時間／時長",left+14,y+37);ctx.fillText("類別",left+w1+14,y+37);ctx.fillText("行程內容",left+w1+w2+14,y+37);y+=56;
  prepared.forEach(({row,lines,height})=>{ctx.fillStyle=row.pending?"#fcffc2":"#fff";ctx.fillRect(left,y,1100,height);ctx.strokeStyle="#d9dee4";ctx.strokeRect(left,y,1100,height);
   ctx.fillStyle="#222";ctx.font="26px sans-serif";ctx.fillText(row.start&&row.end?row.start+"–"+row.end:"—",left+14,y+38);ctx.font="20px sans-serif";ctx.fillStyle="#666";ctx.fillText(formatDuration(row.duration),left+14,y+68);
@@ -465,12 +480,13 @@ function renderScheduleCanvas(date,rowSubset,continuation){
 function wrapText(ctx,text,size,width){ctx.font=size+"px sans-serif";const lines=[];let line="";for(const char of text){if(ctx.measureText(line+char).width>width&&line){lines.push(line);line=char;}else line+=char;}if(line||!lines.length)lines.push(line);return lines;}
 function dataUrlBlob(url){const bytes=atob(url.split(",")[1]),arr=new Uint8Array(bytes.length);for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);return new Blob([arr],{type:"image/png"});}
 function dataUrlBytes(url){const bytes=atob(url.split(",")[1]),arr=new Uint8Array(bytes.length);for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);return arr;}
-function buildPdf(dates){
+/* 將各日期的畫布依既有分頁語意轉成 PDF，每頁皆可在 LOGO 失敗時使用文字備援。 */
+async function buildPdf(dates){
  const enc=new TextEncoder(),objects=[],offsets=[0];let body="%PDF-1.4\n";const add=o=>{objects.push(o);return objects.length;};
  const catalog=add(""),pages=add(""),pageIds=[];
- dates.forEach(date=>{const groups=rowsByPdfPage((state.days[date]||[]).filter(row=>!row.pending));groups.forEach((group,pageIndex)=>{const canvas=renderScheduleCanvas(date,group,pageIndex>0),raw=atob(canvas.toDataURL("image/jpeg",.92).split(",")[1]),bin=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bin[i]=raw.charCodeAt(i);
+ for(const date of dates){const groups=rowsByPdfPage((state.days[date]||[]).filter(row=>!row.pending));for(let pageIndex=0;pageIndex<groups.length;pageIndex++){const canvas=await renderScheduleCanvas(date,groups[pageIndex],pageIndex>0),raw=atob(canvas.toDataURL("image/jpeg",.92).split(",")[1]),bin=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bin[i]=raw.charCodeAt(i);
   const image=add({bin,dict:"<< /Type /XObject /Subtype /Image /Width "+canvas.width+" /Height "+canvas.height+" /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length "+bin.length+" >>"}),stream=enc.encode("q\n595 0 0 842 0 0 cm\n/Im0 Do\nQ\n");
-  const content=add({bin:stream,dict:"<< /Length "+stream.length+" >>"});pageIds.push(add("<< /Type /Page /Parent "+pages+" 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im0 "+image+" 0 R >> >> /Contents "+content+" 0 R >>"));});});
+  const content=add({bin:stream,dict:"<< /Length "+stream.length+" >>"});pageIds.push(add("<< /Type /Page /Parent "+pages+" 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im0 "+image+" 0 R >> >> /Contents "+content+" 0 R >>"));}}
  objects[catalog-1]="<< /Type /Catalog /Pages "+pages+" 0 R >>";objects[pages-1]="<< /Type /Pages /Kids ["+pageIds.map(x=>x+" 0 R").join(" ")+"] /Count "+pageIds.length+" >>";
  objects.forEach((obj,i)=>{offsets.push(body.length);body+=(i+1)+" 0 obj\n";if(typeof obj==="string")body+=obj+"\nendobj\n";else body+=obj.dict+"\nstream\n"+binaryString(obj.bin)+"\nendstream\nendobj\n";});
  const xref=body.length;body+="xref\n0 "+(objects.length+1)+"\n0000000000 65535 f \n";offsets.slice(1).forEach(off=>body+=String(off).padStart(10,"0")+" 00000 n \n");body+="trailer\n<< /Size "+(objects.length+1)+" /Root "+catalog+" 0 R >>\nstartxref\n"+xref+"\n%%EOF";const bytes=new Uint8Array(body.length);for(let i=0;i<body.length;i++)bytes[i]=body.charCodeAt(i)&255;return new Blob([bytes],{type:"application/pdf"});
