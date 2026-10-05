@@ -43,6 +43,7 @@
 - 可操作按鈕 Hover 一律上移 `3px`；`primary` 保持黃色背景並使用 `brightness(.96)`，`minor` 保持白底並將內邊框改為 `--color-yellow-hover`，其餘按鈕同樣使用 `brightness(.96)`。按下時回到原位，並維持各自的 Hover 視覺。背景、內邊框、亮度與位移的過渡時間皆為 `.15s`。
 - 停用按鈕維持原配色，透明度 `.45`、游標 `not-allowed`，且不變色、不位移。僅在鍵盤焦點的 `:focus-visible` 顯示 `2px solid var(--color-purple-700)` 外框，外距 `2px`。
 - 窄螢幕沿用相同字級與內距；本規範不定義 RWD 排列方式。
+- `.lock-btn` 維持既有邊框、圓角與鎖定配色，尺寸固定為 `24px × 24px`；以 `inline-flex` 水平、垂直置中 `10px` 的鎖定圖示，內距為 `0`，且不可因所在的 flex 容器縮小。
 
 ## 時間連動選項燈箱
 

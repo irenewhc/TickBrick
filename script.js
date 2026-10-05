@@ -1,7 +1,7 @@
 /* 行程資料以日期分頁，並保存到目前瀏覽器的 localStorage。 */
 const STORAGE_KEY = "tickbrick_trip_v1";
 const LEGACY_KEY = "hokkaido_itinerary_v47";
-const DEFAULT_CATEGORIES = [{name:"交通",color:"#b2dfff"},{name:"逛街",color:"#ffa7b1"},{name:"景點",color:"#befeb0"},{name:"用餐",color:"#f9f999"}];
+const DEFAULT_CATEGORIES = [{name:"交通",color:"#e3f8eb"},{name:"逛街",color:"#ffe1e1"},{name:"景點",color:"#e4eafb"},{name:"用餐",color:"#fcffc2"}];
 const INITIAL_ROWS = [
  ["06:30","07:30",60,"交通","➔ 桃園機場"],["07:30","09:30",120,"","辦理登機通關"],["09:30","13:05",215,"","Flight to SAPPORO (長榮 BR 116)"],
  ["13:05","14:30",85,"","抵達新千歲機場，辦理入境通關與提取行李"],["14:30","15:30",60,"交通","機場 ➔ 旅館（HELIO HOSTEL）"],
@@ -138,7 +138,7 @@ function rowMarkup(row,index,area){
  const color=(state.categories.find(c=>c.name===row.category)||{}).color||"#FFFFFF",pending=!!row.pending;
  const rowClass=["schedule-row",pending?"pending-row":"",area==="day"&&row.isNew?"new-row-highlight":"",hasConflictForRow(row.id)?"conflict-highlight":""].filter(Boolean).join(" ");
  const inputClass=field=>hasConflictForInput(row.id,field)?" conflict-field-highlight":"";
- const lockButton=field=>'<button class="lock-btn '+(row.lock===field?"locked":"")+'" data-lock="'+field+'" title="鎖定'+({start:"開始時間",end:"結束時間",duration:"總時長"}[field])+'">'+(row.lock===field?"🔒":"🔓")+'</button>';
+ const lockButton=field=>'<button class="lock-btn '+(row.lock===field?"locked":"")+'" data-lock="'+field+'" title="鎖定'+({start:"開始時間",end:"結束時間",duration:"總時長"}[field])+'">'+(row.lock===field?'<i class="fa-solid fa-lock" aria-hidden="true"></i>':'<i class="fa-solid fa-lock-open" aria-hidden="true"></i>')+'</button>';
  const editDisabled=area==="staging"||pending;
  return'<tr class="'+rowClass+'" data-id="'+esc(row.id)+'" data-index="'+index+'" data-area="'+area+'">'+
  '<td class="order-cell" draggable="true"><span class="drag-handle" title="拖曳調整順序">⠿</span>'+(pending?'<span class="pending-tag">待放置</span>':"")+'</td>'+
@@ -197,20 +197,21 @@ function reorderConflictStillBlocks(conflict){
  try{return !!recalculateReorderedDayRow(row,rows.indexOf(row),"重新檢查排序衝突");}
  finally{state.days[conflict.date]=originalRows;state.activeDate=originalDate;}
 }
-/* 在資料副本重播直接時間輸入的原始連動方式，確認整段受影響時間鏈是否仍碰到鎖定欄位。 */
+/* 檢查直接輸入衝突所涵蓋的實際正式行程鏈，確認每列時長與相鄰串接都已恢復一致。 */
 function directConflictStillBlocks(conflict){
  const context=conflict.directContext;if(!context)return null;
- const rows=structuredClone(state.days[conflict.date]||[]),originalDate=state.activeDate,originalRows=state.days[conflict.date];
- state.activeDate=conflict.date;state.days[conflict.date]=rows;
- try{
-  const row=rows.find(item=>item.id===conflict.directRowId),index=rows.indexOf(row);if(!row||index<0)return false;
-  const direct={rowId:row.id,field:context.field},value=row[context.field];
-  if(context.kind==="option")return!!applyTimeOption(row,index,context.field,value,context.key,direct);
-  const companion=context.field==="start"?"end":"start",next=context.field==="start"?timeAfter(row.start,Number(row.duration||60)):timeBefore(row.end,Number(row.duration||60));
-  return!!(setTimeValue(row,companion,next,context.operation,direct)||cascadeFrom(index,context.operation,direct));
- }finally{state.days[conflict.date]=originalRows;state.activeDate=originalDate;}
+ const rows=state.days[conflict.date]||[],directIndex=rows.findIndex(row=>row.id===conflict.directRowId),lockedIndex=rows.findIndex(row=>row.id===conflict.lockedRowId);
+ if(directIndex<0||lockedIndex<0)return false;
+ const start=Math.min(directIndex,lockedIndex),end=Math.max(directIndex,lockedIndex);let previous=null;
+ for(let index=start;index<=end;index++){
+  const row=rows[index];if(!row||row.pending)continue;
+  if(!row.start||!row.end||timeAfter(row.start,Number(row.duration))!==row.end)return true;
+  if(previous&&previous.end!==row.start)return true;
+  previous=row;
+ }
+ return false;
 }
-/* 判斷鎖定與已回復操作的衝突是否仍會阻擋目前資料；直接輸入會先完整重播時間鏈。 */
+/* 判斷鎖定與已回復操作的衝突是否仍會阻擋目前資料；直接輸入以實際時間鏈判定。 */
 function conflictStillBlocks(conflict){
  if(conflict.reorderContext)return reorderConflictStillBlocks(conflict);
  if(conflict.directContext)return directConflictStillBlocks(conflict);
@@ -327,7 +328,7 @@ function applyTimeOption(row,index,field,value,key,direct){
  else if(key==="duration-next"||key==="duration-down"){const end=timeAfter(row.start,Number(value));conflict=set("duration",value)||set("end",end);if(!conflict){const next=formalIndexAfter(index);if(key==="duration-next"&&next>=0){const following=activeRows()[next];conflict=setTimeValue(following,"start",row.end,operation,direct);if(!conflict)conflict=setTimeValue(following,"duration",durationBetween(following.start,following.end),operation,direct);}else if(key==="duration-down")conflict=cascadeForward(index,operation,direct);}}
  return conflict;
 }
-/* 保留直接輸入值與其連動選擇，讓日後重檢可在副本完整重播受影響時間鏈。 */
+/* 保留直接輸入值與其連動選擇，供日後檢查實際受影響時間鏈。 */
 function preserveDirectConflict(backup,rowId,field,value,conflict,directContext){state.days[state.activeDate]=backup;const row=activeRows().find(item=>item.id===rowId);if(row)setDirectValue(row,field,value);recordConflict({...conflict,directContext});render();openConflictModal(conflict,true);}
 /* 執行已選時間調整選項；若碰鎖定則保留直接輸入並保存衝突。 */
 function executeTimeOption(row,index,field,value,option,successMessage){const backup=structuredClone(activeRows()),direct={rowId:row.id,field},conflict=applyTimeOption(row,index,field,value,option.key,direct);if(conflict){preserveDirectConflict(backup,row.id,field,value,conflict,{kind:"option",key:option.key,field});return;}clearConflictsAfterSuccess();render();showToast(successMessage||"時間連動已更新");}

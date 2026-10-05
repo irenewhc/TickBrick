@@ -49,20 +49,57 @@ let lockedRows = api.state().days["2026-10-04"];
 assert.deepEqual(lockedRows.map(row=>[row.start,row.end,row.duration]), [["09:00","23:30",60],["10:00","11:00",60],["11:00","12:00",60],["12:00","13:00",60]], "鎖定衝突時只保留 A 的直接結束時間，其餘下游列必須回復");
 assert.equal(api.state().conflicts.length, 1, "下游鎖定結束時間必須建立未解衝突");
 api.refreshConflicts();
-assert.equal(api.hasUnresolvedConflicts(), true, "重新整理衝突時必須重播 A→B→C→D 的連動，不能因 C 與 D 的舊資料相接而清除");
+assert.equal(api.hasUnresolvedConflicts(), true, "重新整理衝突時必須檢查實際 A→B→C 時間鏈，不能因 C 與 D 的舊資料相接而清除");
 api.exportJSON();
 api.openExportDialog("image");
 api.openExportDialog("pdf");
 assert.equal(api.notices().filter(message=>message==="請先解決本次衝突再執行匯出").length, 3, "JSON、圖片與 PDF 匯出都必須持續被未解下游鎖定衝突阻擋");
 lockedRows.find(row=>row.id==="C").lock="none";
 api.refreshConflicts();
-assert.equal(api.hasUnresolvedConflicts(), true, "解除原本 C 的鎖定後，重播仍須檢查後方 D 的鎖定，不能提前清除衝突");
+assert.equal(api.hasUnresolvedConflicts(), true, "解除原本 C 的鎖定後，實際時間鏈仍未串接，不能提前清除衝突");
 api.exportJSON();
 api.openExportDialog("image");
 api.openExportDialog("pdf");
 assert.equal(api.notices().filter(message=>message==="請先解決本次衝突再執行匯出").length, 6, "C 已解除但 D 仍阻擋時，JSON、圖片與 PDF 匯出仍須全部被阻擋");
 lockedRows.find(row=>row.id==="D").lock="none";
 api.refreshConflicts();
-assert.equal(api.hasUnresolvedConflicts(), false, "解除所有實際阻擋整段下游連動的鎖定後，完整重播成功才可清除衝突");
+assert.equal(api.hasUnresolvedConflicts(), true, "解除所有鎖定但尚未把實際時間鏈串接回來時，衝突不得清除");
+api.executeTimeOption(lockedRows.find(row=>row.id==="A"), 0, "end", "23:30", { key: "end-down" });
+assert.equal(api.hasUnresolvedConflicts(), false, "使用相關時間欄位重新串接實際下游時間鏈後，才可清除衝突");
+
+api.state().days["2026-10-04"] = [
+ {id:"A",start:"06:00",end:"07:00",duration:60,lock:"start",pending:false},
+ {id:"B",start:"07:00",end:"08:00",duration:60,lock:"none",pending:false}
+];
+api.state().conflicts=[];
+api.executeTimeOption(api.state().days["2026-10-04"][1], 1, "start", "07:10", { key: "start-all" });
+lockedRows = api.state().days["2026-10-04"];
+assert.deepEqual(lockedRows.map(row=>[row.start,row.end,row.duration]), [["06:00","07:00",60],["07:10","08:00",60]], "B 直接輸入遇到 A 的開始時間鎖定時，只保留 B 的輸入值");
+assert.equal(api.hasUnresolvedConflicts(), true, "A 與 B 尚未實際串接時必須保留衝突");
+lockedRows.find(row=>row.id==="A").lock="none";
+api.refreshConflicts();
+assert.equal(api.hasUnresolvedConflicts(), true, "只解除 A 的鎖定而未修正實際時間鏈時，衝突與匯出阻擋必須保留");
+api.exportJSON();
+api.openExportDialog("image");
+api.openExportDialog("pdf");
+assert.equal(api.notices().filter(message=>message==="請先解決本次衝突再執行匯出").length, 9, "單純解鎖後，JSON、圖片與 PDF 匯出仍須全部被阻擋");
+api.executeTimeOption(lockedRows.find(row=>row.id==="A"), 0, "start", "06:10", { key: "start-all" });
+lockedRows = api.state().days["2026-10-04"];
+assert.deepEqual(lockedRows.map(row=>[row.start,row.end,row.duration]), [["06:10","07:10",60],["07:10","08:10",60]], "修改同一時間鏈中 A 的開始時間後，必須實際串接 A 與 B 並維持各自行程時長");
+assert.equal(api.hasUnresolvedConflicts(), false, "使用者透過任何相關時間欄位修正實際時間鏈後，才可清除衝突與匯出阻擋");
+
+api.state().days["2026-10-04"] = [
+ {id:"A",start:"06:00",end:"07:00",duration:60,lock:"start",pending:false},
+ {id:"B",start:"07:00",end:"08:00",duration:1500,lock:"none",pending:false}
+];
+api.state().conflicts=[];
+api.executeTimeOption(api.state().days["2026-10-04"][1], 1, "start", "07:10", { key: "start-all" });
+lockedRows = api.state().days["2026-10-04"];
+assert.equal(api.hasUnresolvedConflicts(), true, "超過 24 小時的時長遇到鎖定衝突時仍須保留衝突");
+lockedRows.find(row=>row.id==="A").lock="none";
+api.executeTimeOption(lockedRows.find(row=>row.id==="A"), 0, "start", "06:10", { key: "start-all" });
+lockedRows = api.state().days["2026-10-04"];
+assert.deepEqual(lockedRows.map(row=>[row.start,row.end,row.duration]), [["06:10","07:10",60],["07:10","08:10",1500]], "1,500 分鐘時長必須依 24 小時循環推算為 07:10–08:10");
+assert.equal(api.hasUnresolvedConflicts(), false, "超過 1,440 分鐘的相關行程串接完成後也必須清除衝突");
 
 console.log("downstream circular-time regression test passed");
