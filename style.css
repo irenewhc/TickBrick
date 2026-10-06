@@ -595,6 +595,10 @@ td {
     font-weight: 650
 }
 
+.duration-display.duration-zero {
+    color: var(--color-pink-heavy)
+}
+
 .lock-btn {
     border: 1px solid #cfd6de;
     border-radius: 4px;

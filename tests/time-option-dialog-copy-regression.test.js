@@ -18,6 +18,7 @@ function functionSource(name) {
 
 const handleTimeEdit = functionSource("handleTimeEdit");
 const timeOptions = functionSource("timeOptions");
+const durationValue = functionSource("durationValue");
 const context = { structuredClone };
 vm.createContext(context);
 vm.runInContext(`
@@ -34,6 +35,7 @@ vm.runInContext(`
  function showToast(message){notices.push(message);}
  function clearConflictsAfterSuccess(){}
  function render(){}
+ ${durationValue}
  ${timeOptions}
  ${handleTimeEdit}
  globalThis.openFor=(row,field)=>{currentRow={start:"09:00",end:"10:00",duration:60,lock:"none",...row};dialogCall=null;executedCall=null;notices=[];handleTimeEdit("row",field,field==="duration"?90:"10:00");return {dialog:dialogCall,executed:executedCall,notices};};
@@ -56,8 +58,8 @@ for (const [row, field, expectedTitle] of cases) {
  assert.equal(dialog.actions.at(-1).text, "取消", "多選項燈箱必須保留取消按鈕");
 }
 
-assert.deepEqual([...context.optionsFor("start")].map(option=>[option.key,option.text]), [["start-all","時長不變，更新前後行程時間"],["start-previous","結束時間不變，更新時長及上一項行程的時長"],["start-up","結束時間不變，更新時長及之前行程的時間"]], "開始時間選項必須使用核定文案");
-assert.deepEqual([...context.optionsFor("end")].map(option=>[option.key,option.text]), [["end-all","時長不變，更新前後行程時間"],["end-next","開始時間不變，更新時長及下一項行程的時長"],["end-down","開始時間不變，更新時長及之後行程的時間"]], "結束時間選項必須使用核定文案");
+assert.deepEqual([...context.optionsFor("start")].map(option=>[option.key,option.text]), [["start-all","時長不變，更新前後行程時間"],["start-fixed-previous","時長不變，更新結束時間及上一項行程的時長"],["start-fixed-next","時長不變，更新結束時間及下一項行程的時長"],["start-previous","結束時間不變，更新時長及上一項行程的時長"],["start-up","結束時間不變，更新時長及之前行程的時間"]], "開始時間選項必須包含既有與新增的核定文案");
+assert.deepEqual([...context.optionsFor("end")].map(option=>[option.key,option.text]), [["end-all","時長不變，更新前後行程時間"],["end-fixed-previous","時長不變，更新開始時間及上一項行程的時長"],["end-fixed-next","時長不變，更新開始時間及下一項行程的時長"],["end-next","開始時間不變，更新時長及下一項行程的時長"],["end-down","開始時間不變，更新時長及之後行程的時間"]], "結束時間選項必須包含既有與新增的核定文案");
 assert.deepEqual([...context.optionsFor("duration")].map(option=>[option.key,option.text]), [["duration-previous","結束時間不變，更新開始時間及上一項行程的時長"],["duration-up","結束時間不變，更新開始時間及之前行程的時間"],["duration-next","開始時間不變，更新結束時間及下一項行程的時長"],["duration-down","開始時間不變，更新結束時間及之後行程的時間"]], "總時長選項必須使用核定文案並依上一項、之前、下一項、之後排序");
 
 const singleOption = context.openFor({content:"早餐",lock:"end",single:true}, "start");
