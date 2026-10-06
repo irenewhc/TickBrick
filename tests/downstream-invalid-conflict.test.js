@@ -4,7 +4,7 @@ import vm from "node:vm";
 
 const source = fs.readFileSync("script.js", "utf8");
 const logic = source.slice(source.indexOf("function getList"), source.indexOf("/* 行程操作"));
-const exports = source.slice(source.indexOf("function hasUnresolvedConflicts"), source.indexOf("function exportImages"));
+const exports = source.slice(source.indexOf("function hasUnresolvedConflicts"), source.indexOf("async function exportImages"));
 const context = { console, structuredClone, Blob, setTimeout: () => 0, clearTimeout: () => {} };
 
 vm.createContext(context);

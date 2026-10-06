@@ -104,7 +104,7 @@ function finishTouchDrag(){
  else if(current.target.kind==="empty-day"&&current.area==="staging")moveStagingRowToDay(row);
  else if(current.target.kind==="row"){
   if(current.area==="staging"&&current.target.area==="day")moveStagingRowToDay(row,current.target.id,current.target.after);
-  else if(current.area===current.target.area)reorderRow(current.area,current.id,current.target.id,current.target.after);
+  else if(current.area===current.target.area)requestReorder(current.area,current.id,current.target.id,current.target.after);
  }
 }
 
@@ -159,7 +159,7 @@ function bindRows(root,area){
   tr.addEventListener("dragend",()=>tr.classList.remove("row-dragging"));
   tr.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"))){e.preventDefault();tr.classList.add("drag-over");}});
   tr.addEventListener("dragleave",()=>tr.classList.remove("drag-over"));
-  tr.addEventListener("drop",e=>{e.preventDefault();tr.classList.remove("drag-over");if(area==="day"&&draggedRow&&draggedRow.type==="row"&&draggedRow.area==="staging"){const stagingRow=getRow("staging",draggedRow.id);if(stagingRow)moveStagingRowToDay(stagingRow,row.id);return;}reorderRow(area,draggedRow&&draggedRow.id,row.id);});
+  tr.addEventListener("drop",e=>{e.preventDefault();tr.classList.remove("drag-over");if(area==="day"&&draggedRow&&draggedRow.type==="row"&&draggedRow.area==="staging"){const stagingRow=getRow("staging",draggedRow.id);if(stagingRow)moveStagingRowToDay(stagingRow,row.id);return;}requestReorder(area,draggedRow&&draggedRow.id,row.id);});
   tr.querySelectorAll("[data-field]").forEach(input=>input.addEventListener("change",()=>{
    const field=input.dataset.field;
    if(area==="day"&&!row.pending&&["start","end","duration"].includes(field))handleTimeEdit(row.id,field,input.value);
@@ -250,10 +250,26 @@ function updateRow(area,id,field,value){
  clearConflictsAfterSuccess();
  persist();renderDay();renderStaging();
 }
-/* 依排序後的相鄰正式行程選擇時間錨點；時間以 24 小時循環，最上方反推後也從原首列向下重算完整正式鏈。 */
+/* 找出排序後應保留時間的鎖定開始／結束錨點；拖曳列自身優先，其次才是前後相鄰正式列。 */
+function reorderTimeAnchorIndex(row,index){
+ const rows=activeRows();if(["start","end"].includes(row.lock))return index;
+ const previousIndex=findFormalBefore(rows,index),nextIndex=findFormalAfter(rows,index);
+ if(nextIndex>=0&&["start","end"].includes(rows[nextIndex].lock))return nextIndex;
+ if(previousIndex>=0&&["start","end"].includes(rows[previousIndex].lock))return previousIndex;
+ return-1;
+}
+/* 依排序後的相鄰正式行程或鎖定時間錨點重算完整時間鏈；時間以 24 小時循環。 */
 function recalculateReorderedDayRow(row,index,operation){
  if(row.pending)return null;
- const rows=activeRows(),previousIndex=findFormalBefore(rows,index);
+ const rows=activeRows(),anchorIndex=reorderTimeAnchorIndex(row,index);
+ if(anchorIndex>=0){
+  const anchor=rows[anchorIndex],anchoredField=anchor.lock;
+  const requiredField=anchoredField==="start"?"end":"start",requiredValue=anchoredField==="start"?timeAfter(anchor.start,Number(anchor.duration||60)):timeBefore(anchor.end,Number(anchor.duration||60));
+  const anchorConflict=setTimeValue(anchor,requiredField,requiredValue,operation);if(anchorConflict)return anchorConflict;
+  const backwardConflict=cascadeBackward(anchorIndex,operation);if(backwardConflict)return backwardConflict;
+  return cascadeForward(anchorIndex,operation);
+ }
+ const previousIndex=findFormalBefore(rows,index);
  if(previousIndex>=0)return cascadeForward(index,operation);
  const nextIndex=findFormalAfter(rows,index);
  if(nextIndex<0||!rows[nextIndex].start)return null;
@@ -263,6 +279,16 @@ function recalculateReorderedDayRow(row,index,operation){
  const startConflict=setTimeValue(row,"start",start,operation);
  if(startConflict)return startConflict;
  return cascadeForward(nextIndex,operation);
+}
+/* 由桌面與觸控共用的排序入口；拖曳列鎖定開始／結束時間時，先取得使用者確認再重算。 */
+function requestReorder(area,fromId,toId,placeAfter){
+ const row=getRow(area,fromId);if(!row)return;
+ if(area==="day"&&["start","end"].includes(row.lock)){
+  const lockedField=fieldLabel(row.lock),subject=String(row.content||"").trim()||"此行程";draggedRow=null;
+  openDialog("確認時間連動","由於「"+subject+"」的「"+lockedField+"」已鎖定，因此時間連動會以該行程的「"+lockedField+"」為基礎更新其他行程。",[{text:"我知道了",cls:"primary",run:()=>reorderRow(area,fromId,toId,placeAfter)},{text:"取消移動",cls:"",run:()=>render()}]);
+  return;
+ }
+ reorderRow(area,fromId,toId,placeAfter);
 }
 /* 依目標列前後位置重新排序，並以排序專用時間錨點重算；未傳第四參數時維持桌面原生放下即置於目標後的舊行為。 */
 function reorderRow(area,fromId,toId,placeAfter){

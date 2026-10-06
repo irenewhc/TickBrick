@@ -35,6 +35,8 @@ assert.doesNotMatch(touchLogic, /pointercancel[\s\S]*?moveEvent/, "垂直拖動�
 const clearIndex = updateLogic.indexOf("touchDrag.target=null");
 const hitTestIndex = updateLogic.indexOf("document.elementFromPoint");
 assert.ok(clearIndex >= 0 && clearIndex < hitTestIndex, "每次命中測試前都必須清空前一個觸控放置目標");
+assert.match(functionSource("finishTouchDrag"), /requestReorder\(current\.area,current\.id,current\.target\.id,current\.target\.after\)/, "觸控同區排序必須使用共用確認入口");
+assert.match(functionSource("bindRows"), /requestReorder\(area,draggedRow&&draggedRow\.id,row\.id\)/, "桌面放下排序必須使用共用確認入口");
 
 const targetRow = {
  dataset: { area: "day", id: "B" },
@@ -66,6 +68,7 @@ assert.equal(targetContext.target(), null, "有效目標後移到無效位置時
 
 const reorder = functionSource("reorderRow");
 const recalculateReorderedDayRow = functionSource("recalculateReorderedDayRow");
+const reorderTimeAnchorIndex = functionSource("reorderTimeAnchorIndex");
 const context = { structuredClone };
 vm.createContext(context);
 vm.runInContext(`
@@ -84,6 +87,7 @@ vm.runInContext(`
  function recordConflict(){}
  function presentOperationConflict(){}
  let draggedRow=null;
+ ${reorderTimeAnchorIndex}
  ${recalculateReorderedDayRow}
  ${reorder}
  globalThis.rows=()=>state.days["2026-10-04"].map(row=>row.id);
