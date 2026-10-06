@@ -157,10 +157,10 @@ function bindRows(root,area){
  root.querySelectorAll("tr[data-id]").forEach(tr=>{const row=getRow(area,tr.dataset.id);
   tr.addEventListener("focusin",()=>{if(row.isNew){row.isNew=false;tr.classList.remove("new-row-highlight");persist();}});
   tr.addEventListener("dragstart",e=>{if(!e.target.closest(".order-cell")){e.preventDefault();return;}draggedRow={type:"row",area,id:row.id};e.dataTransfer.effectAllowed="move";const rect=tr.getBoundingClientRect();e.dataTransfer.setDragImage(tr,e.clientX-rect.left,e.clientY-rect.top);tr.classList.add("row-dragging");});
-  tr.addEventListener("dragend",()=>tr.classList.remove("row-dragging"));
-  tr.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"))){e.preventDefault();tr.classList.add("drag-over");}});
-  tr.addEventListener("dragleave",()=>tr.classList.remove("drag-over"));
-  tr.addEventListener("drop",e=>{e.preventDefault();tr.classList.remove("drag-over");if(area==="day"&&draggedRow&&draggedRow.type==="row"&&draggedRow.area==="staging"){const stagingRow=getRow("staging",draggedRow.id);if(stagingRow)moveStagingRowToDay(stagingRow,row.id);return;}requestReorder(area,draggedRow&&draggedRow.id,row.id);});
+  tr.addEventListener("dragend",()=>{tr.classList.remove("row-dragging");draggedRow=null;document.querySelectorAll(".touch-drop-before,.touch-drop-after").forEach(item=>item.classList.remove("touch-drop-before","touch-drop-after"));});
+  tr.addEventListener("dragover",e=>{const acceptsRow=draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"));if(acceptsRow){e.preventDefault();const after=e.clientY>=tr.getBoundingClientRect().top+tr.getBoundingClientRect().height/2;document.querySelectorAll(".touch-drop-before,.touch-drop-after").forEach(item=>item.classList.remove("touch-drop-before","touch-drop-after"));tr.classList.add(after?"touch-drop-after":"touch-drop-before");}});
+  tr.addEventListener("dragleave",()=>tr.classList.remove("touch-drop-before","touch-drop-after"));
+  tr.addEventListener("drop",e=>{const acceptsRow=draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"));if(!acceptsRow)return;e.preventDefault();e.stopPropagation();const after=e.clientY>=tr.getBoundingClientRect().top+tr.getBoundingClientRect().height/2;tr.classList.remove("touch-drop-before","touch-drop-after");if(area==="day"&&draggedRow.area==="staging"){const stagingRow=getRow("staging",draggedRow.id);if(stagingRow)moveStagingRowToDay(stagingRow,row.id,after);return;}requestReorder(area,draggedRow.id,row.id,after);});
   tr.querySelectorAll("[data-field]").forEach(input=>input.addEventListener("change",()=>{
    const field=input.dataset.field;
    if(area==="day"&&!row.pending&&["start","end","duration"].includes(field))handleTimeEdit(row.id,field,input.value);
