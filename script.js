@@ -16,24 +16,25 @@ let exportLogoPromise, exportLogoFallbackNotified=false;
 /* 建立含未解決衝突欄位的空白應用程式狀態。 */
 function blankState(){return{version:2,dates:[],activeDate:"",days:{},staging:[],categories:DEFAULT_CATEGORIES.map(x=>({...x})),conflicts:[]};}
 function makeId(){return"r"+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
-/* 建立行程列，保留 0 分鐘時長並以 60 分鐘補足缺值。 */
-function makeRow(date,start,end,duration,category,content){return{id:makeId(),date:date||"",start:start||"",end:end||"",duration:durationValue(duration),lock:"none",category:category||"",content:content||"",pending:false};}
+/* 建立行程列，保留 0 分鐘時長、待確認預設值並以 60 分鐘補足缺值。 */
+function makeRow(date,start,end,duration,category,content){return{id:makeId(),date:date||"",start:start||"",end:end||"",duration:durationValue(duration),lock:"none",category:category||"",content:content||"",confirmed:false,pending:false};}
+/* 載入目前或舊版瀏覽器資料，並交由正規化流程補齊待確認欄位。 */
 function loadState(){
  try{
   const current=localStorage.getItem(STORAGE_KEY);if(current)return normalizeState(JSON.parse(current));
   const legacy=localStorage.getItem(LEGACY_KEY);
-  if(legacy){const migrated=blankState();JSON.parse(legacy).forEach(old=>{const date=old.date||"2026-10-29";if(!migrated.days[date]){migrated.days[date]=[];migrated.dates.push(date);}migrated.days[date].push({...old,id:old.id||makeId(),date,pending:false});});migrated.dates.sort();migrated.activeDate=migrated.dates[0]||"";localStorage.setItem(STORAGE_KEY,JSON.stringify(migrated));return migrated;}
+  if(legacy){const migrated=blankState();JSON.parse(legacy).forEach(old=>{const date=old.date||"2026-10-29";if(!migrated.days[date]){migrated.days[date]=[];migrated.dates.push(date);}migrated.days[date].push({...old,id:old.id||makeId(),date,confirmed:!!old.confirmed,pending:false});});migrated.dates.sort();migrated.activeDate=migrated.dates[0]||"";localStorage.setItem(STORAGE_KEY,JSON.stringify(migrated));return migrated;}
  }catch(error){console.error("行程資料讀取失敗",error);}
  const initial=blankState(),date="2026-10-29";initial.dates=[date];initial.activeDate=date;initial.days[date]=INITIAL_ROWS.map(r=>makeRow(date,...r));return initial;
 }
-/* 將舊版或匯入資料正規化為含衝突保存資訊的目前狀態格式。 */
+/* 將舊版或匯入資料正規化為含衝突與待確認保存資訊的目前狀態格式。 */
 function normalizeState(input){
  const result=blankState();
- if(Array.isArray(input)){input.forEach(row=>{const date=row.date||"2026-10-29";if(!result.days[date]){result.days[date]=[];result.dates.push(date);}result.days[date].push({...row,id:row.id||makeId(),date,pending:false});});result.dates.sort();result.activeDate=result.dates[0]||"";return result;}
+ if(Array.isArray(input)){input.forEach(row=>{const date=row.date||"2026-10-29";if(!result.days[date]){result.days[date]=[];result.dates.push(date);}result.days[date].push({...row,id:row.id||makeId(),date,confirmed:!!row.confirmed,pending:false});});result.dates.sort();result.activeDate=result.dates[0]||"";return result;}
  result.version=input.version||1;result.dates=Array.isArray(input.dates)?[...new Set(input.dates.filter(validDate))]:[];
  result.activeDate=result.dates.includes(input.activeDate)?input.activeDate:(result.dates[0]||"");
- result.dates.forEach(date=>result.days[date]=Array.isArray(input.days&&input.days[date])?input.days[date].map(row=>({...row,id:row.id||makeId(),date,pending:!!row.pending})):[]);
- result.staging=Array.isArray(input.staging)?input.staging.map(row=>({...row,id:row.id||makeId(),date:"",start:"",end:"",pending:false})):[];
+ result.dates.forEach(date=>result.days[date]=Array.isArray(input.days&&input.days[date])?input.days[date].map(row=>({...row,id:row.id||makeId(),date,confirmed:!!row.confirmed,pending:!!row.pending})):[]);
+ result.staging=Array.isArray(input.staging)?input.staging.map(row=>({...row,id:row.id||makeId(),date:"",start:"",end:"",confirmed:!!row.confirmed,pending:false})):[];
  result.categories=Array.isArray(input.categories)?input.categories.map(c=>({name:String(c.name),color:/^#[0-9a-f]{6}$/i.test(c.color)?c.color:"#FFFFFF"})):DEFAULT_CATEGORIES.map(c=>({...c}));
  result.conflicts=Array.isArray(input.conflicts)?input.conflicts.filter(conflict=>conflict&&typeof conflict==="object"&&typeof conflict.lockedRowId==="string"&&typeof conflict.lockedField==="string").map(conflict=>({...conflict})):[];
  DEFAULT_CATEGORIES.forEach(def=>{if(!result.categories.some(c=>c.name===def.name))result.categories.push({...def});});return result;
@@ -135,7 +136,7 @@ function renderStaging(){
  root.innerHTML=state.staging.map((row,index)=>rowMarkup(row,index,"staging")).join("");bindRows(root,"staging");
 }
 function categoryOptions(value){return'<option value=""></option>'+state.categories.map(c=>'<option value="'+esc(c.name)+'" '+(value===c.name?"selected":"")+'>'+esc(c.name)+'</option>').join("");}
-/* 產生正式區或暫存區單列 HTML，並套用保存中的衝突提示狀態。 */
+/* 產生正式區或暫存區單列 HTML，並套用保存中的衝突與待確認提示狀態。 */
 function rowMarkup(row,index,area){
  const color=(state.categories.find(c=>c.name===row.category)||{}).color||"#FFFFFF",pending=!!row.pending;
  const rowClass=["schedule-row",pending?"pending-row":"",area==="day"&&row.isNew?"new-row-highlight":"",hasConflictForRow(row.id)?"conflict-highlight":""].filter(Boolean).join(" ");
@@ -147,12 +148,14 @@ function rowMarkup(row,index,area){
  '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("start")+'" aria-label="開始時間" value="'+esc(row.start)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="start"?"disabled":"")+' data-field="start">'+(area==="day"?lockButton("start"):"")+'</div></td>'+
  '<td><div class="time-cell"><input type="text" class="time-input'+inputClass("end")+'" aria-label="結束時間" value="'+esc(row.end)+'" placeholder="HH:MM" '+(editDisabled||row.lock==="end"?"disabled":"")+' data-field="end">'+(area==="day"?lockButton("end"):"")+'</div></td>'+
  '<td><div class="duration-cell"><div class="duration-editor"><input type="number" class="duration-input'+inputClass("duration")+'" min="0" value="'+esc(row.duration)+'" aria-label="總時長（分鐘）" '+(pending||row.lock==="duration"?"disabled":"")+' data-field="duration"><span>分鐘</span>'+(area==="day"?lockButton("duration"):"")+'</div><span class="duration-display'+(Number(row.duration)===0?" duration-zero":"")+'">'+formatDuration(row.duration)+'</span></div></td>'+
- '<td><select class="category-select" aria-label="類別" style="background-color:'+color+'" data-field="category">'+categoryOptions(row.category)+'</select></td>'+
- '<td><input class="content-input" type="text" aria-label="行程內容" value="'+esc(row.content)+'" placeholder="輸入行程內容" data-field="content"></td>'+
+ '<td><div class="category-select-wrapper"><select class="category-select" aria-label="類別" style="background-color:'+color+'" data-field="category">'+categoryOptions(row.category)+'</select><i class="fa-solid fa-chevron-down category-select-icon" aria-hidden="true"></i></div></td>'+
+ '<td><div class="content-editor"><label class="confirmation-toggle"><input type="checkbox" data-confirmed-toggle '+(row.confirmed?"checked":"")+'> 待確認</label><textarea class="content-input'+(row.confirmed?" confirmation-pending":"")+'" aria-label="行程內容" placeholder="輸入行程內容" data-field="content" rows="1" wrap="soft">'+esc(row.content)+'</textarea></div></td>'+
  '<td><div class="row-actions">'+(area==="day"?(pending?'<button class="button small primary" data-action="place">放置此處</button><button class="button small minor" data-action="stage">移至暫存</button>':'<button class="button small" data-action="move">移至其他日期</button><button class="button small" data-action="stage">移至暫存</button>'):'<button class="button small" data-action="move">移至其他日期</button>')+'</div></td>'+
  '<td><button class="icon-button" data-action="delete" aria-label="刪除行程">×</button></td></tr>';
 }
-/* 綁定行程列的桌面拖放、觸控拖放、欄位編輯與行程操作。 */
+/* 依文字內容自動調整行程 textarea 高度，避免出現內容框內的水平捲動。 */
+function resizeContentTextarea(textarea){textarea.style.height="auto";textarea.style.height=textarea.scrollHeight+"px";}
+/* 綁定行程列的桌面拖放、觸控拖放、欄位編輯、待確認切換與行程操作。 */
 function bindRows(root,area){
  root.querySelectorAll("tr[data-id]").forEach(tr=>{const row=getRow(area,tr.dataset.id);
   tr.addEventListener("focusin",()=>{if(row.isNew){row.isNew=false;tr.classList.remove("new-row-highlight");persist();}});
@@ -166,6 +169,8 @@ function bindRows(root,area){
    if(area==="day"&&!row.pending&&["start","end","duration"].includes(field))handleTimeEdit(row.id,field,input.value);
    else updateRow(area,row.id,field,input.value);
   }));
+  tr.querySelectorAll(".content-input").forEach(textarea=>{resizeContentTextarea(textarea);textarea.addEventListener("input",()=>resizeContentTextarea(textarea));});
+  tr.querySelectorAll("[data-confirmed-toggle]").forEach(input=>input.addEventListener("change",()=>updateRow(area,row.id,"confirmed",input.checked)));
   tr.querySelectorAll("[data-lock]").forEach(button=>button.addEventListener("click",()=>{row.lock=row.lock===button.dataset.lock?"none":button.dataset.lock;clearConflictsAfterSuccess();renderDay();renderStaging();}));
   tr.querySelector(".category-select").addEventListener("change",e=>e.currentTarget.style.backgroundColor=(state.categories.find(c=>c.name===e.currentTarget.value)||{}).color||"#fff");
   tr.querySelectorAll("[data-action]").forEach(button=>button.addEventListener("click",()=>rowAction(area,row.id,button.dataset.action)));
@@ -243,11 +248,12 @@ function recordConflict(conflict,reorderContext){if(reorderContext)conflict={...
 function clearConflictsAfterSuccess(){refreshConflicts();persist();}
 /* 在衝突回復後重新寫回使用者直接輸入的欄位值。 */
 function setDirectValue(row,field,value){row[field]=value;}
-/* 更新非正式時間連動入口的欄位，並在成功後重檢既有衝突。 */
+/* 更新非正式時間連動入口與待確認欄位，並在成功後重檢既有衝突。 */
 function updateRow(area,id,field,value){
  const row=getRow(area,id);if(!row)return;
  if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");render();return;}
- if(field==="duration"){row.duration=durationValue(value,0);}
+ if(field==="confirmed"){row.confirmed=Boolean(value);}
+ else if(field==="duration"){row.duration=durationValue(value,0);}
  else if(field==="start"||field==="end"){row[field]=formatTime(value);}
  else row[field]=value;
  clearConflictsAfterSuccess();
@@ -504,20 +510,29 @@ function loadExportLogo(){
 async function exportImages(dates){exportLogoFallbackNotified=false;const files=await Promise.all(dates.map(async date=>{const canvas=await renderScheduleCanvas(date);return{name:date+".png",data:dataUrlBytes(canvas.toDataURL("image/png"))};}));if(files.length===1)downloadBlob(new Blob([files[0].data],{type:"image/png"}),files[0].name);else downloadBlob(zipFiles(files),"TickBrick_圖片_"+dates[0]+"_"+dates[dates.length-1]+".zip");}
 /* 依選擇產生合併或分日 PDF；各頁以 LOGO 或文字備援繪製後再轉為影像。 */
 async function exportPdfs(dates,mode){exportLogoFallbackNotified=false;const ordered=dates.slice().sort();if(mode==="merged"){downloadBlob(await buildPdf(ordered),"TickBrick_"+ordered[0]+"_"+ordered[ordered.length-1]+".pdf");return;}const files=await Promise.all(ordered.map(async date=>({name:date+".pdf",blob:await buildPdf([date])})));if(files.length===1)downloadBlob(files[0].blob,files[0].name);else downloadBlob(zipFiles(await Promise.all(files.map(async f=>({name:f.name,data:new Uint8Array(await f.blob.arrayBuffer())})))),"TickBrick_PDF_"+ordered[0]+"_"+ordered[ordered.length-1]+".zip");}
-/* 以已載入的匯出 LOGO 或「行程樂高 TickBrick」文字建立單日或 PDF 續頁畫布。 */
+/* 以已載入的匯出 LOGO 或「行程樂高 TickBrick」文字建立單日或 PDF 續頁畫布，並標示待確認行程。 */
 async function renderScheduleCanvas(date,rowSubset,continuation){
- const rows=rowSubset||(state.days[date]||[]).filter(row=>!row.pending),measure=document.createElement("canvas").getContext("2d"),prepared=rows.map(row=>{const lines=wrapText(measure,row.content||"",28,520);return{row,lines,height:Math.max(90,lines.length*38+30)};}),contentHeight=prepared.reduce((sum,item)=>sum+item.height,0);
+ const rows=rowSubset||(state.days[date]||[]).filter(row=>!row.pending),measure=document.createElement("canvas").getContext("2d"),prepared=rows.map(row=>{const lines=wrapText(measure,row.content||"",28,520),confirmationHeight=row.confirmed?26:0;return{row,lines,confirmationHeight,height:Math.max(90,lines.length*38+30+confirmationHeight)};}),contentHeight=prepared.reduce((sum,item)=>sum+item.height,0);
  const canvas=document.createElement("canvas");canvas.width=1240;canvas.height=Math.max(1754,261+contentHeight+70);const ctx=canvas.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
  const logoX=80,logoY=40,logoVisibleHeight=60,logoDateGap=30,logoVisibleWidth=907/264*logoVisibleHeight,dateY=logoY+logoVisibleHeight+logoDateGap+28;
  try{const logo=await loadExportLogo();ctx.drawImage(logo,35,37,907,264,logoX,logoY,logoVisibleWidth,logoVisibleHeight);}catch(error){console.warn("匯出 LOGO 載入失敗，改用文字備援",error);ctx.font="bold 38px sans-serif";ctx.fillStyle="#2c3e50";ctx.fillText("行程樂高 TickBrick",logoX,logoY+45);if(!exportLogoFallbackNotified){exportLogoFallbackNotified=true;showToast("匯出 LOGO 無法載入，已改用文字備援");}}
  ctx.font="28px sans-serif";ctx.fillStyle="#555";ctx.fillText(dateLabel(date,true)+(continuation?"（續）":""),logoX,dateY);
  let y=205;const left=70,w1=240,w2=240;ctx.fillStyle="#2c3e50";ctx.fillRect(left,y,1100,56);ctx.fillStyle="#fff";ctx.font="bold 23px sans-serif";ctx.fillText("時間／時長",left+14,y+37);ctx.fillText("類別",left+w1+14,y+37);ctx.fillText("行程內容",left+w1+w2+14,y+37);y+=56;
- prepared.forEach(({row,lines,height})=>{ctx.fillStyle=row.pending?"#fcffc2":"#fff";ctx.fillRect(left,y,1100,height);ctx.strokeStyle="#d9dee4";ctx.strokeRect(left,y,1100,height);
+ prepared.forEach(({row,lines,confirmationHeight,height})=>{ctx.fillStyle=row.pending?"#fcffc2":"#fff";ctx.fillRect(left,y,1100,height);ctx.strokeStyle="#d9dee4";ctx.strokeRect(left,y,1100,height);
   ctx.fillStyle="#222";ctx.font="26px sans-serif";ctx.fillText(row.start&&row.end?row.start+"–"+row.end:"—",left+14,y+38);ctx.font="20px sans-serif";ctx.fillStyle="#666";ctx.fillText(formatDuration(row.duration),left+14,y+68);
   ctx.fillStyle=(state.categories.find(c=>c.name===row.category)||{}).color||"#fff";ctx.fillRect(left+w1+8,y+10,110,height-20);ctx.fillStyle="#222";ctx.font="22px sans-serif";ctx.fillText(row.category||"",left+w1+15,y+42);
-  ctx.fillStyle="#222";ctx.font="26px sans-serif";lines.forEach((line,i)=>ctx.fillText(line,left+w1+w2+14,y+38+i*38));if(row.pending){ctx.fillStyle="#826709";ctx.font="18px sans-serif";ctx.fillText("待放置",left+1000,y+30);}y+=height;});return canvas;
+  if(row.confirmed){ctx.fillStyle="#826709";ctx.font="17px sans-serif";ctx.fillText("待確認",left+w1+w2+14,y+28);}ctx.fillStyle="#222";ctx.font="26px sans-serif";lines.forEach((line,i)=>ctx.fillText(line,left+w1+w2+14,y+38+confirmationHeight+i*38));if(row.pending){ctx.fillStyle="#826709";ctx.font="18px sans-serif";ctx.fillText("待放置",left+1000,y+30);}y+=height;});return canvas;
 }
-function wrapText(ctx,text,size,width){ctx.font=size+"px sans-serif";const lines=[];let line="";for(const char of text){if(ctx.measureText(line+char).width>width&&line){lines.push(line);line=char;}else line+=char;}if(line||!lines.length)lines.push(line);return lines;}
+/* 文字匯出優先在空白處換行；沒有可換行空白的中文或超長網址才逐字折行。 */
+function wrapText(ctx,text,size,width){
+ ctx.font=size+"px sans-serif";const lines=[];
+ String(text).split(/\r?\n/).forEach(paragraph=>{let line="",hasWord=false;const words=paragraph.match(/\S+/g)||[];
+  if(!words.length){lines.push("");return;}
+  words.forEach(word=>{const candidate=hasWord?line+" "+word:word;if(ctx.measureText(candidate).width<=width){line=candidate;hasWord=true;return;}if(hasWord)lines.push(line);line="";hasWord=false;
+   for(const char of word){if(ctx.measureText(line+char).width>width&&line){lines.push(line);line=char;}else line+=char;}hasWord=Boolean(line);
+  });if(hasWord)lines.push(line);
+ });return lines.length?lines:[""];
+}
 function dataUrlBlob(url){const bytes=atob(url.split(",")[1]),arr=new Uint8Array(bytes.length);for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);return new Blob([arr],{type:"image/png"});}
 function dataUrlBytes(url){const bytes=atob(url.split(",")[1]),arr=new Uint8Array(bytes.length);for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);return arr;}
 /* 將各日期的畫布依既有分頁語意轉成 PDF，每頁皆可在 LOGO 失敗時使用文字備援。 */
@@ -531,9 +546,10 @@ async function buildPdf(dates){
  objects.forEach((obj,i)=>{offsets.push(body.length);body+=(i+1)+" 0 obj\n";if(typeof obj==="string")body+=obj+"\nendobj\n";else body+=obj.dict+"\nstream\n"+binaryString(obj.bin)+"\nendstream\nendobj\n";});
  const xref=body.length;body+="xref\n0 "+(objects.length+1)+"\n0000000000 65535 f \n";offsets.slice(1).forEach(off=>body+=String(off).padStart(10,"0")+" 00000 n \n");body+="trailer\n<< /Size "+(objects.length+1)+" /Root "+catalog+" 0 R >>\nstartxref\n"+xref+"\n%%EOF";const bytes=new Uint8Array(body.length);for(let i=0;i<body.length;i++)bytes[i]=body.charCodeAt(i)&255;return new Blob([bytes],{type:"application/pdf"});
 }
+/* 依待確認標記與內容折行高度切分 PDF 頁面，避免分頁與畫布列高不一致。 */
 function rowsByPdfPage(rows){
  if(!rows.length)return[[]];const measure=document.createElement("canvas").getContext("2d"),pages=[];let page=[],used=0;
- rows.forEach(row=>{const lines=wrapText(measure,row.content||"",28,520),height=Math.max(90,lines.length*38+30);if(page.length&&used+height>1450){pages.push(page);page=[];used=0;}page.push(row);used+=height;});if(page.length)pages.push(page);return pages;
+ rows.forEach(row=>{const lines=wrapText(measure,row.content||"",28,520),height=Math.max(90,lines.length*38+30+(row.confirmed?26:0));if(page.length&&used+height>1450){pages.push(page);page=[];used=0;}page.push(row);used+=height;});if(page.length)pages.push(page);return pages;
 }
 function binaryString(bytes){let value="";for(let i=0;i<bytes.length;i+=0x8000)value+=String.fromCharCode(...bytes.subarray(i,i+0x8000));return value;}
 /* 建立無壓縮 ZIP，包含各日圖片或 PDF。 */

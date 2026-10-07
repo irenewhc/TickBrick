@@ -411,29 +411,26 @@ td {
 }
 
 /* 表格欄位寬度 */
-.order-col {
-    width: 76px
+.order-col,
+.delete-col {
+    width: 50px;
 }
 
 .start-col,
 .end-col {
-    width: 118px
+    width: 120px;
 }
 
 .duration-col {
-    width: 145px
+    width: 140px;
 }
 
 .category-col {
-    width: 130px
+    width: 100px;
 }
 
 .move-col {
-    width: 166px
-}
-
-.delete-col {
-    width: 50px
+    width: 150px;
 }
 
 /* 行程列狀態與拖曳效果 */
@@ -604,7 +601,8 @@ td {
 }
 
 input,
-select {
+select,
+textarea {
     border: 1px solid #d6dce3;
     border-radius: 6px;
     padding: 6px;
@@ -612,19 +610,70 @@ select {
     background: white
 }
 
+.category-select-wrapper {
+    position: relative;
+    width: 100%;
+}
+
 .category-select {
     width: 100%;
-    min-height: 34px
+    min-height: 34px;
+    appearance: none;
+    padding-right: 28px
+}
+
+.category-select-icon {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    color: var(--color-purple-900);
+    font-size: 10px;
+    pointer-events: none;
+    transform: translateY(-50%);
 }
 
 .category-select option {
     background-color: white;
 }
 
+.content-editor {
+    display: grid;
+    gap: 5px;
+    text-align: left
+}
+
+.confirmation-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    gap: 5px;
+    color: var(--color-gray-heavy);
+    font-size: 12px;
+    line-height: 1.35;
+    white-space: nowrap
+}
+
+.confirmation-toggle input {
+    margin: 0;
+    accent-color: var(--color-pink-heavy)
+}
+
 .content-input {
     width: 100%;
     min-width: 170px;
-    text-align: left
+    min-height: 34px;
+    resize: none;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    text-align: left;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: normal;
+    line-height: 1.5
+}
+
+.content-input.confirmation-pending {
+    border-color: var(--color-pink-heavy)
 }
 
 .row-actions {

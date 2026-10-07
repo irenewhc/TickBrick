@@ -55,6 +55,16 @@
 
 - 桌面與觸控拖曳至行程列時，`touch-drop-before` 以列內上緣 `inset 0 3px var(--color-purple-700)` 表示插前，`touch-drop-after` 以列內下緣 `inset 0 -3px var(--color-purple-700)` 表示插後。兩者不使用行程列偽元素或列外延伸陰影，避免因此引入垂直捲軸。
 
+## 行程表欄位寬度
+
+桌面與暫存區行程表共用下列欄位寬度：排序 `50px`、開始時間 `120px`、結束時間 `120px`、總時長 `140px`、類別 `100px`、行程內容為彈性欄、移動 `150px`、刪除 `50px`。這些數值是已確認的版面決定，後續調整須依 Vibe Coding 流程討論。
+
+## 行程內容與待確認標記
+
+- 行程內容使用可自動增高的 `textarea`；它與既有 input／select 共用 `1px solid #d6dce3` 邊框、`6px` 圓角與內距、`--color-purple-900` 文字及白底。保留換行，中文自然折行，英文優先在單字間折行，只有超長單字或網址才可在字元間折行，內容框不顯示水平捲軸。
+- 每筆內容上方靠左顯示「待確認」核取方塊，標籤文字使用 `--color-gray-heavy`。勾選後僅將內容框外框改為 `--color-pink-heavy`；文字與可編輯狀態維持原樣。核取方塊的強調色同用 `--color-pink-heavy`。
+- `.category-select` 保持既有類別底色，外層以 `.category-select-wrapper` 包住可操作的 select 與裝飾性 `<i class="fa-solid fa-chevron-down">`；箭頭使用 `--color-purple-900`、`aria-hidden="true"` 與 `pointer-events: none`，置於距右側 `10px` 的位置。select 右側保留足夠內距，不可與箭頭重疊；不得保留 CSS SVG／自訂箭頭。
+
 ## 時間連動選項燈箱
 
 - 僅時間連動的多選項燈箱使用專用排列：可執行調整選項皆為 `.button.minor`，以內容寬度垂直靠左排列；取消維持基礎 `.button`，另列且靠右。窄螢幕維持相同排列，選項不可撐滿可用寬度。
