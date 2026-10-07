@@ -655,7 +655,40 @@ textarea {
 
 .confirmation-toggle input {
     margin: 0;
-    accent-color: var(--color-pink-heavy)
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--color-gray-heavy);
+    border-radius: 2px;
+    background: #fff;
+    display: grid;
+    place-content: center;
+    cursor: pointer
+}
+
+.confirmation-toggle input:checked {
+    border-color: var(--color-pink-heavy);
+    background: var(--color-pink-heavy)
+}
+
+.confirmation-toggle input:checked::after {
+    content: "";
+    width: 4px;
+    height: 7px;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) translate(-1px, -1px)
+}
+
+.confirmation-toggle input:focus-visible {
+    outline: 2px solid var(--color-purple-700);
+    outline-offset: 2px
+}
+
+@media (forced-colors: active) {
+    .confirmation-toggle input {
+        appearance: auto;
+    }
 }
 
 .content-input {

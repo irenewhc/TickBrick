@@ -15,6 +15,7 @@
 | `--color-yellow-light` | `#feffe7` | 待放置行程等低強度黃色背景。 |
 | `--color-red` | `#FF5252` | 刪除、危險操作與警示重點。 |
 | `--color-pink-light` | `#ffe1e1` | 危險 Hover 與淺紅提示背景。 |
+| `--color-pink-heavy` | `#c11414` | 待確認內容框與核取方塊的深粉紅強調色。 |
 | `--color-gray` | `#e6e6e6` | 一般按鈕與中性控制項背景。 |
 | `--color-gray-light` | `#f6f6f6` | 淺灰邊界與次級背景。 |
 | `--color-gray-heavy` | `#7F7F7F` | 次要文字。 |
@@ -62,7 +63,7 @@
 ## 行程內容與待確認標記
 
 - 行程內容使用可自動增高的 `textarea`；它與既有 input／select 共用 `1px solid #d6dce3` 邊框、`6px` 圓角與內距、`--color-purple-900` 文字及白底。保留換行，中文自然折行，英文優先在單字間折行，只有超長單字或網址才可在字元間折行，內容框不顯示水平捲軸。
-- 每筆內容上方靠左顯示「待確認」核取方塊，標籤文字使用 `--color-gray-heavy`。勾選後僅將內容框外框改為 `--color-pink-heavy`；文字與可編輯狀態維持原樣。核取方塊的強調色同用 `--color-pink-heavy`。
+- 每筆內容上方靠左顯示「待確認」核取方塊，標籤文字使用 `--color-gray-heavy`。核取方塊為 `14px` 的自訂外觀：未勾選為 `--color-gray-heavy` 邊框；勾選後為 `--color-pink-heavy` 背景及邊框、白色勾。鍵盤 `:focus-visible` 顯示既有紫色外框；強制色彩模式改用系統原生外觀。勾選後僅將內容框外框改為 `--color-pink-heavy`；文字與可編輯狀態維持原樣。
 - `.category-select` 保持既有類別底色，外層以 `.category-select-wrapper` 包住可操作的 select 與裝飾性 `<i class="fa-solid fa-chevron-down">`；箭頭使用 `--color-purple-900`、`aria-hidden="true"` 與 `pointer-events: none`，置於距右側 `10px` 的位置。select 右側保留足夠內距，不可與箭頭重疊；不得保留 CSS SVG／自訂箭頭。
 
 ## 時間連動選項燈箱
