@@ -11,7 +11,7 @@ assert.match(source, /pending-duration-wheel[\s\S]*?role","listbox/, "待放置�
 assert.match(source, /wheel\.addEventListener\("wheel"/, "候選滾輪必須支援滑鼠滾輪切換");
 assert.match(source, /pointermove[\s\S]*?keydown/, "候選滾輪必須支援拖曳與鍵盤切換");
 assert.match(source, /openDialog\("時間衝突",content/, "候選燈箱標題必須為「時間衝突」");
-assert.match(source, /text:"套用調整"[\s\S]*?text:"取消放置"/, "候選燈箱按鈕必須同列依序為「套用調整」、「取消放置」");
+assert.match(source, /text:"套用調整"[\s\S]*?text:cancelText/, "共用候選燈箱按鈕必須同列保留「套用調整」及可依操作切換的取消動作");
 assert.match(source, /cause=locked\.length\?"由於"/, "候選燈箱必須依實際時間鎖定組成衝突原因");
 assert.match(source, /displayName=value=>value\.length>20\?value\.slice\(0,20\)\+"\.\.\.":value/, "候選與結果名稱必須統一截斷為最多 20 字加省略號");
 assert.match(source, /wheel\.scrollTop=selected\*34/, "切換候選時必須以列高捲動，讓首尾候選都可置於固定中央位置");
@@ -40,13 +40,16 @@ assert.match(styles, /\.dialog-actions\.pending-duration-actions\s*\{[\s\S]*?fle
 
 vm.createContext(context);
 vm.runInContext(`
- let state={activeDate:"2026-10-04",days:{"2026-10-04":[]},staging:[],conflicts:[]};
- let draggedRow=null;
+ let state={activeDate:"2026-10-04",dates:["2026-10-04"],days:{"2026-10-04":[]},staging:[],conflicts:[]};
+ let draggedRow=null,effects={persist:0,render:0,toast:0};
  function makeId(){return "conflict-"+Math.random();}
  function activeRows(){return state.days[state.activeDate];}
- function persist(){}
- function render(){}
- function showToast(){}
+ function validDate(){return true;}
+ function calendarMonthFor(){return {};}
+ function dateLabel(value){return value;}
+ function persist(){effects.persist++;}
+ function render(){effects.render++;}
+ function showToast(){effects.toast++;}
  function presentOperationConflict(){}
  let dialogs=[];
  function openDialog(title,content,actions){dialogs.push({title,content,actions});}
@@ -60,8 +63,14 @@ vm.runInContext(`
   update(id,patch){Object.assign(state.days[state.activeDate].find(row=>row.id===id),patch);},
   reorder:reorderRow,
   request:requestReorder,
+  stage(id){moveRowToStaging(state.days[state.activeDate].find(item=>item.id===id));},
+  delete(id){deleteRowWithAdjustment("day",id);},
+  move(id,target){moveToDate("day",state.days[state.activeDate].find(item=>item.id===id),target);},
+  effects(){return {...effects};},
+  resetEffects(){effects={persist:0,render:0,toast:0};},
   place(id){placePending(state.days[state.activeDate].find(item=>item.id===id));},
   pendingTarget:pendingDurationTarget,
+  reorderCandidates(rows,conflict){return reorderCandidateIds(rows,conflict);},
   openPending(id,before){openPendingDurationDialog(state.days[state.activeDate].find(item=>item.id===id),before);},
   structural:recalculateStructuralChain,
   dialog(){return dialogs.at(-1);},
@@ -71,6 +80,14 @@ vm.runInContext(`
 
 const api = context.api;
 const row = (id,start,end,duration=60,lock="none",pending=false,content="") => ({ id,start,end,duration,lock,pending,content });
+const timeAfter = (start,duration) => { const [hour,minute]=start.split(":").map(Number),value=((hour*60+minute+duration)%1440+1440)%1440;return `${String(Math.floor(value/60)).padStart(2,"0")}:${String(value%60).padStart(2,"0")}`; };
+const assertTimeChain = (items,message) => { const scheduled=items.filter(item=>!item.pending);scheduled.forEach((item,index)=>{assert.equal(timeAfter(item.start,item.duration),item.end,`${message}：${item.id} 必須保留本列時長`);if(index)assert.equal(item.start,scheduled[index-1].end,`${message}：${item.id} 必須銜接前一列`);}); };
+
+const boundaryRows = (firstLock,lastLock) => [row("F","09:00","10:00",60,firstLock),row("M","10:00","11:00"),row("L","11:00","12:00",60,lastLock)];
+assert.deepEqual(api.reorderCandidates(boundaryRows("start","start"),{anchorRowId:"F",lockedRowId:"L"}), ["F","M"], "開始→開始的排序候選必須包含前端開始鎖定列與中間列，排除尾端開始鎖定列");
+assert.deepEqual(api.reorderCandidates(boundaryRows("start","end"),{anchorRowId:"F",lockedRowId:"L"}), ["F","M","L"], "開始→結束的排序候選必須包含前端開始鎖定列、中間列與尾端結束鎖定列");
+assert.deepEqual(api.reorderCandidates(boundaryRows("end","start"),{anchorRowId:"F",lockedRowId:"L"}), ["M"], "結束→開始的排序候選只能包含中間列");
+assert.deepEqual(api.reorderCandidates(boundaryRows("end","end"),{anchorRowId:"F",lockedRowId:"L"}), ["M","L"], "結束→結束的排序候選必須包含中間列與尾端結束鎖定列");
 
 api.setRows([row("A","07:30","08:30"),row("B","08:30","09:30")]);
 api.reorder("day","B","A",false);
@@ -129,21 +146,123 @@ assert.deepEqual(rows.map(item => [item.id,item.start,item.end]), [["A","22:30",
 
 api.setRows([row("A","13:20","14:20"),row("B","14:20","15:20",60,"end"),row("C","15:20","18:50",210,"start"),row("D","18:50","19:50")]);
 api.reorder("day","D","C",false);
+let dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "排序遇到可由單列吸收的鎖定衝突時，應顯示共用調整燈箱");
+assert.equal(api.conflicts().length, 0, "尚未確認候選前不得保存排序衝突或阻擋匯出");
+dialog.actions.find(action=>action.text==="套用調整").run();
 rows = api.rows();
-assert.deepEqual(rows.map(item => item.id), ["A","B","C","D"], "錨點以外的第二個不相容鎖定必須完整回復排序");
-assert.equal(api.conflicts()[0].lockedRowId, "B", "第二個鎖定衝突必須指向實際無法調整的欄位");
-assert.equal(api.conflicts()[0].requiredValue, "14:20", "遠端不相容結束時間鎖定的所需值必須是正確 HH:MM，而非 NaN:NaN");
+assert.deepEqual(rows.map(item => item.id), ["A","B","D","C"], "確認候選後必須保留使用者的排序操作");
+assert.equal(rows.find(item=>item.id==="D").duration, 0, "排序區間超額時，候選必須可縮短單一未鎖定時長至可行值");
+assertTimeChain(rows, "結束→開始候選套用後");
 api.refresh();
-assert.equal(api.conflicts().length, 1, "排序回復後鎖定衝突不得因原資料恢復而消失");
-assert.equal(api.exportBlocked(), true, "未解決的排序鎖定衝突必須阻擋匯出");
-api.update("B", { lock:"none" });
-api.refresh();
-assert.equal(api.conflicts().length, 0, "解除相關鎖定且模擬排序可成立後才可清除衝突");
+assert.equal(api.conflicts().length, 0, "套用可行候選後不得保留排序衝突或阻擋匯出");
+
+api.setRows([row("A","09:00","10:00",60,"start"),row("B","10:00","11:00"),row("C","11:00","12:00",60,"start"),row("D","12:00","13:00")]);
+api.clearDialogs();
+api.reorder("day","D","A",true);
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "錨點後方鎖定時間要求較早時必須顯示排序時長候選");
+dialog.actions.find(action=>action.text==="套用調整").run();
+rows = api.rows();
+assert.equal(rows.filter(item=>["A","B","D"].includes(item.id)).some(item=>item.duration===0), true, "錨點後方的鎖定區間超額必須縮短候選，不得以增加 1,440 分鐘掩蓋衝突");
+assertTimeChain(rows, "開始→開始候選套用後");
+
+api.setRows([row("A","09:00","10:00",60,"start"),row("B","10:00","11:00"),row("C","11:00","12:00",60,"end"),row("D","12:00","13:00")]);
+api.clearDialogs();
+api.reorder("day","D","A",true);
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "開始→結束鎖定區間的排序衝突必須提供涵蓋兩端的候選");
+dialog.actions.find(action=>action.text==="套用調整").run();
+rows = api.rows();
+assertTimeChain(rows, "開始→結束候選套用後");
+assert.equal(api.conflicts().length, 0, "開始→結束候選套用後不得留下衝突");
+
+api.setRows([row("A","09:00","10:00",60,"start"),row("X","10:00","11:00"),row("B","11:00","12:00",60,"start")]);
+api.clearDialogs();
+api.reorder("day","X","B",true);
+dialog = api.dialog();
+dialog.actions.find(action=>action.text==="取消").run();
+assert.deepEqual(api.rows().map(item=>item.id), ["A","X","B"], "取消可行的排序候選必須完整回復原排序");
+assert.equal(api.conflicts().length, 0, "取消可行候選不得記錄衝突或阻擋匯出");
+
+api.setRows([row("A","09:00","10:00",60,"start"),row("X","10:00","11:00"),row("B","11:00","12:00",60,"start")]);
+api.clearDialogs();
+api.delete("X");
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "刪除造成來源時間鏈不足時應顯示共同候選燈箱");
+dialog.actions.find(action=>action.text==="套用調整").run();
+rows = api.rows();
+assert.deepEqual(rows.map(item=>item.id), ["A","B"], "確認候選後應完成原刪除操作");
+assert.equal(rows.find(item=>item.id==="A").duration, 120, "刪除來源鏈不足時只能增加單一候選時長以保留鎖定");
+
+api.setRows([row("A","09:00","10:00",60,"end"),row("X","10:00","11:00"),row("B","11:00","12:00",60,"end")]);
+api.clearDialogs();
+api.resetEffects();
+api.delete("X");
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "尾端結束時間鎖定列可吸收來源移出後的不足時，必須出現候選燈箱");
+assert.equal(Object.values(api.effects()).reduce((sum,value)=>sum+value,0), 0, "silent 候選試算成功不得保存、重繪或顯示提示");
+dialog.actions.find(action=>action.text==="套用調整").run();
+rows = api.rows();
+assert.equal(rows.find(item=>item.id==="B").duration, 120, "尾端結束時間鎖定列本身未鎖定時長時必須可增加以完成刪除");
+
+api.setRows([row("A","09:00","10:00",60,"end"),row("X","10:00","11:00"),row("B","11:00","12:00",60,"end")]);
+api.clearDialogs();
+api.stage("X");
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "移至暫存的來源鏈也必須將尾端結束時間鎖定列列為候選");
+dialog.actions.find(action=>action.text==="套用調整").run();
+assert.equal(api.rows().find(item=>item.id==="B").duration, 120, "確認後必須由尾端結束時間鎖定列吸收移至暫存的來源鏈不足");
+
+api.setRows([row("A","09:00","10:00",60,"end"),row("X","10:00","11:00",60,"duration"),row("B","11:00","12:00",60,"end"),row("D","12:00","13:00",60,"duration")]);
+api.clearDialogs();
+api.reorder("day","D","B",false);
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "排序鎖定區間的尾端結束時間列未鎖定時長時必須列為候選");
+dialog.actions.find(action=>action.text==="套用調整").run();
+assert.equal(api.rows().find(item=>item.id==="B").duration, 0, "排序區間超額時尾端結束時間鎖定列必須可縮短至可行時長");
+assertTimeChain(api.rows(), "結束→結束候選套用後");
+
+api.setRows([row("A","09:00","10:00",60,"start"),row("X","10:00","11:00"),row("B","11:00","12:00",60,"start")]);
+api.clearDialogs();
+api.stage("X");
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "移至暫存造成來源時間鏈不足時應顯示共同候選燈箱");
+dialog.actions.find(action=>action.text==="套用調整").run();
+rows = api.rows();
+assert.deepEqual(rows.map(item=>item.id), ["A","B"], "確認候選後應完成移至暫存操作");
+assert.equal(rows.find(item=>item.id==="A").duration, 120, "移至暫存來源鏈不足時只能增加單一候選時長");
+
+api.setRows([row("A","09:00","10:00",60,"start"),row("X","10:00","11:00"),row("B","11:00","12:00",60,"start")]);
+api.clearDialogs();
+api.move("X","2026-10-05");
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "移至其他日期造成來源時間鏈不足時應顯示共同候選燈箱");
+dialog.actions.find(action=>action.text==="套用調整").run();
+assert.equal(api.rows().find(item=>item.id==="X").pending, true, "確認候選後應將行程移為目標日期的待放置項目");
+
+api.setRows([row("A","13:20","14:20"),row("B","14:20","15:20",60,"end"),row("C","15:20","18:50",210,"start"),row("D","18:50","19:50",60,"duration")]);
+api.clearDialogs();
+api.reorder("day","D","C",false);
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "沒有未鎖定時長候選時仍應說明衝突原因");
+dialog.actions.find(action=>action.text==="取消").run();
+assert.deepEqual(api.rows().map(item=>item.id), ["A","B","C","D"], "無候選取消必須回復排序前資料");
+assert.equal(api.conflicts().length, 0, "無候選取消不得保存此次衝突或阻擋匯出");
+
+api.setRows([row("A","09:00","10:00",60,"end"),row("P","","",90,"duration",true),row("B","11:00","12:00",60,"start")]);
+api.clearDialogs();
+api.place("P");
+dialog = api.dialog();
+assert.equal(dialog.title, "時間衝突", "待放置行程沒有可單列調整候選時仍應只顯示原因與取消");
+dialog.actions.find(action=>action.text==="取消放置").run();
+assert.equal(api.rows().find(item=>item.id==="P").pending, true, "待放置無候選取消必須維持原待放置資料");
+assert.equal(api.conflicts().length, 0, "待放置無候選取消不得保存此次衝突或阻擋匯出");
 
 api.setRows([row("A","09:00","10:00"),row("B","10:00","11:00",60,"start",false,"早餐"),row("C","11:00","12:00")]);
 api.clearDialogs();
 api.request("day","B","A",false);
-let dialog = api.dialog();
+dialog = api.dialog();
 assert.equal(dialog.content, "由於「早餐」的「開始時間」已鎖定，因此時間連動會以該行程的「開始時間」為基礎更新其他行程。", "拖曳鎖定列前必須顯示正確確認文案");
 assert.deepEqual(api.rows().map(item => item.id), ["A","B","C"], "尚未確認時不得套用排序");
 dialog.actions.find(action => action.text === "我知道了").run();

@@ -249,7 +249,7 @@ function lockedChainBases(rows){
 /* 依整條正式鏈所有時間鎖定重算；多個鎖定不相容時回傳第一個實際衝突。 */
 function recalculateLockedChain(operation,direct,preferredIndex=-1){
  const rows=activeRows(),bases=lockedChainBases(rows);if(!bases.length)return null;const preferred=bases.find(item=>item.index===preferredIndex),anchor=preferred||bases[0];
- for(const constraint of bases.slice(1)){if(constraint.base!==anchor.base){const start=timeAfter(anchor.base,constraint.elapsed),required=constraint.field==="start"?start:timeAfter(start,durationValue(constraint.row.duration));return conflictFor(constraint.row,constraint.field,required,operation,direct);}}
+ for(const constraint of bases){if(constraint===anchor)continue;if(constraint.base!==anchor.base){const start=timeAfter(anchor.base,constraint.elapsed),required=constraint.field==="start"?start:timeAfter(start,durationValue(constraint.row.duration)),conflict=conflictFor(constraint.row,constraint.field,required,operation,direct);conflict.anchorRowId=anchor.row.id;return conflict;}}
  let elapsed=0;
  for(const row of rows){if(row.pending)continue;const start=timeAfter(anchor.base,elapsed),end=timeAfter(start,durationValue(row.duration)),startConflict=setTimeValue(row,"start",start,operation,direct);if(startConflict)return startConflict;const endConflict=setTimeValue(row,"end",end,operation,direct);if(endConflict)return endConflict;elapsed+=durationValue(row.duration);}
  return null;
@@ -316,12 +316,20 @@ function requestReorder(area,fromId,toId,placeAfter){
  }
  reorderRow(area,fromId,toId,placeAfter);
 }
+/* 結構性操作遇時間鎖定衝突時，試算可單列調整時長的候選；取消或無候選都只回復操作。 */
+function offerStructuralDurationAdjustment(beforeState,config){
+ const {operation,conflict,candidateIds,mode,attempt,success,reorderContext}=config,rows=beforeState.days[beforeState.activeDate]||[],locked=rows.filter(row=>!row.pending&&["start","end"].includes(row.lock)),candidates=structuralDurationCandidates(beforeState,candidateIds,mode,attempt);
+ state=structuredClone(beforeState);
+ if(!candidates.length){render();openDurationAdjustmentDialog({operation,candidates,locked,onCancel:()=>render()});return;}
+ openDurationAdjustmentDialog({operation,candidates,locked,onCancel:()=>{state=structuredClone(beforeState);render();},apply:item=>{state=structuredClone(beforeState);const current=attempt({id:item.row.id,duration:item.target},false);if(current){state=structuredClone(beforeState);render();openDurationAdjustmentDialog({operation,candidates:[],locked,onCancel:()=>render()});return;}clearConflictsAfterSuccess();render();showToast(success);}});
+}
 /* 依目標列前後位置重新排序，並以排序專用時間錨點重算；未傳第四參數時維持桌面原生放下即置於目標後的舊行為。 */
-function reorderRow(area,fromId,toId,placeAfter){
+function reorderRow(area,fromId,toId,placeAfter,adjustment,silent){
  if(!fromId||fromId===toId)return;const list=getList(area),from=list.findIndex(r=>r.id===fromId),to=list.findIndex(r=>r.id===toId);if(from<0||to<0)return;
- const backup=structuredClone(list),row=list.splice(from,1)[0],insertAt=placeAfter===undefined?to:to+(placeAfter?1:0)-(from<to+(placeAfter?1:0)?1:0);list.splice(insertAt,0,row);
+ const stateBackup=structuredClone(state),backup=structuredClone(list),row=list.splice(from,1)[0],insertAt=placeAfter===undefined?to:to+(placeAfter?1:0)-(from<to+(placeAfter?1:0)?1:0);list.splice(insertAt,0,row);if(adjustment){const candidate=list.find(item=>item.id===adjustment.id);if(candidate)candidate.duration=adjustment.duration;}
  const reorderContext={sourceId:row.id,beforeId:list[insertAt-1]&&list[insertAt-1].id||"",afterId:list[insertAt+1]&&list[insertAt+1].id||""};
- if(area==="day"){const conflict=recalculateReorderedDayRow(row,list.indexOf(row),"重新排序");if(conflict){state.days[state.activeDate]=backup;recordConflict(conflict,reorderContext);draggedRow=null;render();presentOperationConflict(conflict);return;}}
+ if(area==="day"){const conflict=recalculateReorderedDayRow(row,list.indexOf(row),"重新排序");if(conflict){const candidateIds=reorderCandidateIds(list,conflict);state=stateBackup;if(silent)return conflict;if(!adjustment){offerStructuralDurationAdjustment(stateBackup,{operation:"重新排序",conflict,candidateIds,mode:structuralAdjustmentMode(conflict,list),attempt:(trial,trialSilent)=>reorderRow(area,fromId,toId,placeAfter,trial,trialSilent),success:"已調整時長並更新排序",reorderContext});return;}recordConflict(conflict,reorderContext);draggedRow=null;render();presentOperationConflict(conflict);return;}}
+ if(silent)return null;
  draggedRow=null;clearConflictsAfterSuccess();render();if(area==="day")showToast("排序已更新");
 }
 /* 從指定正式行程向上串接，保留各列時長並以 24 小時循環推算開始時間。 */
@@ -424,11 +432,12 @@ function rowAction(area,id,action){
  if(action==="place")placePending(row);
  if(action==="move")chooseDate(target=>moveToDate(area,row,target));
 }
-/* 將正式行程移至暫存並重新串接來源日期，鎖定衝突時完整回復。 */
-function moveRowToStaging(row){
- const list=activeRows(),index=list.indexOf(row);if(index<0)return;
- const backup=structuredClone(list);list.splice(index,1);row.start="";row.end="";row.date="";row.pending=false;row.lock="none";row.isNew=false;state.staging.push(row);
- const conflict=recalculateStructuralChain(Math.max(0,index-1),"移至暫存");if(conflict){state.staging.pop();state.days[state.activeDate]=backup;recordConflict(conflict);render();presentOperationConflict(conflict);return;}
+/* 將正式行程移至暫存並重新串接來源日期，鎖定衝突時可試算來源列的增長時長。 */
+function moveRowToStaging(row,adjustment,silent){
+ row=activeRows().find(item=>item.id===(row&&row.id))||row;const list=activeRows(),index=list.indexOf(row);if(index<0)return;
+ const stateBackup=structuredClone(state);list.splice(index,1);if(adjustment){const candidate=list.find(item=>item.id===adjustment.id);if(candidate)candidate.duration=adjustment.duration;}row.start="";row.end="";row.date="";row.pending=false;row.lock="none";row.isNew=false;state.staging.push(row);
+ const conflict=recalculateStructuralChain(Math.max(0,index-1),"移至暫存");if(conflict){const candidateIds=structuralCandidateIds(activeRows(),conflict);state=stateBackup;if(silent)return conflict;if(!adjustment){offerStructuralDurationAdjustment(stateBackup,{operation:"移至暫存",conflict,candidateIds,mode:"expand",attempt:(trial,trialSilent)=>moveRowToStaging(getRow("day",row.id),trial,trialSilent),success:"已調整時長並移至共用暫存區"});return;}recordConflict(conflict);render();presentOperationConflict(conflict);return;}
+ if(silent)return null;
  draggedRow=null;clearConflictsAfterSuccess();render();showToast("行程已移至共用暫存區");
 }
 /* 將暫存行程插入目前日期指定列的前後，並維持待放置狀態。 */
@@ -440,22 +449,31 @@ function moveStagingRowToDay(row,targetId,placeAfter=false){
  draggedRow=null;clearConflictsAfterSuccess();render();showToast("行程已移至 "+dateLabel(state.activeDate)+"，確認位置後按「放置此處」");
 }
 /* 顯示刪除確認並在正式行程刪除後重新串接時間鏈。 */
-function confirmDeleteRow(area,row){
+function confirmDeleteRow(area,row,adjustment,silent){
+ if(silent)return deleteRowWithAdjustment(area,row&&row.id,adjustment,true);
  const detail=document.createElement("div"),intro=document.createElement("p"),item=document.createElement("div");
  intro.textContent="您確定要刪除以下行程嗎？";item.className="delete-confirm-item";item.textContent=(row.start||"—")+" ~ "+(row.end||"—")+" : "+(row.content||"(無內容)");detail.append(intro,item);
- openDialog("確認刪除行程",detail,[{text:"刪除",cls:"danger",run:()=>{const list=getList(area),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;list.splice(index,1);if(area==="day"){const conflict=recalculateStructuralChain(Math.max(0,index-1),"刪除行程");if(conflict){state.days[state.activeDate]=backup;recordConflict(conflict);render();presentOperationConflict(conflict);return;}}clearConflictsAfterSuccess();render();showToast("行程已刪除，時間自動串聯完成");}},{text:"取消",cls:""}]);
+ openDialog("確認刪除行程",detail,[{text:"刪除",cls:"danger",run:()=>deleteRowWithAdjustment(area,row.id,adjustment,false)},{text:"取消",cls:""}]);
+}
+/* 執行確認後的刪除；來源鏈不相容時僅試算剩餘列的時長增加。 */
+function deleteRowWithAdjustment(area,rowId,adjustment,silent){
+ const row=getRow(area,rowId),list=getList(area),index=list.indexOf(row);if(index<0)return;const stateBackup=structuredClone(state);list.splice(index,1);if(adjustment&&area==="day"){const candidate=activeRows().find(item=>item.id===adjustment.id);if(candidate)candidate.duration=adjustment.duration;}
+ if(area==="day"){const conflict=recalculateStructuralChain(Math.max(0,index-1),"刪除行程");if(conflict){const candidateIds=structuralCandidateIds(activeRows(),conflict);state=stateBackup;if(silent)return conflict;if(!adjustment){offerStructuralDurationAdjustment(stateBackup,{operation:"刪除行程",conflict,candidateIds,mode:"expand",attempt:(trial,trialSilent)=>deleteRowWithAdjustment(area,rowId,trial,trialSilent),success:"已調整時長並刪除行程"});return;}recordConflict(conflict);render();presentOperationConflict(conflict);return;}}
+ if(silent)return null;
+ clearConflictsAfterSuccess();render();showToast("行程已刪除，時間自動串聯完成");
 }
 /* 顯示鎖定衝突的所需值與回復結果，關閉後仍保留黃／紅提示。 */
 function openConflictModal(conflict,direct){const locked=getRow("day",conflict.lockedRowId),item=locked&&locked.content?"「"+locked.content+"」":"此行程";const content=document.createElement("div"),messageLine=document.createElement("p"),detail=document.createElement("p"),hint=document.createElement("p");messageLine.className="conflict-message";messageLine.textContent=conflict.insufficientDuration?"無法完成「"+conflict.operation+"」："+item+"的總時長不足，調整後會成為 "+conflict.requiredValue+" 分鐘。":"無法完成「"+conflict.operation+"」："+item+"的「"+fieldLabel(conflict.lockedField)+"」已鎖定。";detail.textContent=conflict.insufficientDuration?"請調整相鄰行程的總時長或本次輸入時間。":"此欄目前為 "+(conflict.lockedValue||"空白")+"，要維持時間串接必須改為 "+(conflict.requiredValue||"指定值")+"。";hint.className="conflict-hint";hint.textContent=direct?"已保留修改的欄位資訊，時間連動已復原，提示將保留直到衝突解決。":"本次操作已復原；提示將保留，直到衝突確實解決。";content.append(messageLine,detail,hint);openDialog("⚠️ 行程時間衝突警告",content,[{text:"我知道了",cls:"danger",run:()=>render()}]);}
 /* 以統一鎖定衝突燈箱提示會回復操作的行程動作。 */
 function presentOperationConflict(conflict){openConflictModal(conflict);}
-/* 移出目前日期前先重新串接來源日期；遇鎖定衝突則完整回復移動。 */
-function moveToDate(area,row,targetDate){
+/* 移出目前日期前先重新串接來源日期；遇鎖定衝突則可試算來源列的時長增加。 */
+function moveToDate(area,row,targetDate,adjustment,silent){
  if(!validDate(targetDate))return;
- const stateBackup=structuredClone(state);
+ row=(area==="staging"?state.staging:activeRows()).find(item=>item.id===(row&&row.id))||row;if(!row)return;const stateBackup=structuredClone(state);
  if(!state.dates.includes(targetDate)){state.dates.push(targetDate);state.days[targetDate]=[];}
- const list=area==="staging"?state.staging:activeRows(),index=list.indexOf(row),backup=area==="day"?structuredClone(list):null;if(index>=0)list.splice(index,1);
- if(area==="day"){const conflict=recalculateStructuralChain(Math.max(0,index-1),"移至其他日期");if(conflict){state=stateBackup;recordConflict(conflict);render();openConflictModal(conflict);return;}}
+ const list=area==="staging"?state.staging:activeRows(),index=list.indexOf(row);if(index>=0)list.splice(index,1);if(adjustment&&area==="day"){const candidate=activeRows().find(item=>item.id===adjustment.id);if(candidate)candidate.duration=adjustment.duration;}
+ if(area==="day"){const conflict=recalculateStructuralChain(Math.max(0,index-1),"移至其他日期");if(conflict){const candidateIds=structuralCandidateIds(activeRows(),conflict);state=stateBackup;if(silent)return conflict;if(!adjustment){offerStructuralDurationAdjustment(stateBackup,{operation:"移至其他日期",conflict,candidateIds,mode:"expand",attempt:(trial,trialSilent)=>moveToDate(area,getRow(area,row.id),targetDate,trial,trialSilent),success:"已調整時長並移至其他日期"});return;}recordConflict(conflict);render();presentOperationConflict(conflict);return;}}
+ if(silent)return null;
  row.date=targetDate;row.pending=true;row.lock="none";row.isNew=false;state.days[targetDate].push(row);state.activeDate=targetDate;activeCalendarMonth=calendarMonthFor(targetDate);clearConflictsAfterSuccess();render();showToast("行程已移至 "+dateLabel(targetDate)+"，確認位置後按「放置此處」");
 }
 /* 試算放置待確認行程；可選擇只調整一筆候選時長，失敗時不保存衝突。 */
@@ -475,20 +493,57 @@ function pendingDurationTarget(before,rowId,candidateId){
  for(let duration=0;duration<1440;duration++){const trial=structuredClone(before);state.days[state.activeDate]=trial;const result=tryPlacePending(rowId,candidateId,duration);state.days[state.activeDate]=original;if(!result.conflict)residues.push(duration);}
  const candidates=residues.map(duration=>duration+Math.floor((current-1-duration)/1440)*1440).filter(duration=>duration>=0&&duration<current);return candidates.length?Math.max(...candidates):null;
 }
-/* 顯示可單獨吸收待放置衝突的行程選擇，並即時預覽原／新分鐘數。 */
-function openPendingDurationDialog(row,before){
- const candidates=before.filter(item=>!item.pending&&item.lock!=="duration").concat(before.find(item=>item.id===row.id)).filter(Boolean).map(item=>({row:item,target:pendingDurationTarget(before,row.id,item.id)})).filter(item=>item.target!==null),displayName=value=>value.length>20?value.slice(0,20)+"...":value,locked=before.filter(item=>!item.pending&&["start","end"].includes(item.lock)),cause=locked.length?"由於"+locked.map(item=>"「"+displayName(String(item.content||"").trim()||"此行程")+"」的「"+fieldLabel(item.lock)+"」").join("及")+"已鎖定，造成時間衝突。":"造成時間衝突。";
- if(!candidates.length){state.days[state.activeDate]=before;render();openDialog("時間衝突",cause+"目前沒有一筆行程能單獨調整總時長並同時保留所有開始／結束時間鎖定。",[{text:"取消放置",cls:"",run:()=>render()}]);return;}
- state.days[state.activeDate]=before;const content=document.createElement("div"),reason=document.createElement("p"),adjustment=document.createElement("p"),wheel=document.createElement("div"),suffix=document.createElement("span"),preview=document.createElement("p");let selected=0,dragStart=null,dragging=false;content.className="pending-duration-content";reason.className="pending-duration-reason";reason.textContent="由於";locked.forEach((item,index)=>{const part=document.createElement("span"),connector=document.createElement("span");part.className="pending-duration-lock";part.textContent="「"+displayName(String(item.content||"").trim()||"此行程")+"」的「"+fieldLabel(item.lock)+"」";connector.textContent=index===locked.length-1?"已鎖定，造成時間衝突。":"及";reason.append(part,connector);});adjustment.className="pending-duration-adjustment";adjustment.textContent="請調整 ";suffix.textContent=" 時長，以便放置行程。";preview.className="pending-duration-result";wheel.className="pending-duration-wheel";wheel.tabIndex=0;wheel.setAttribute("role","listbox");
+/* 依調整方向找出符合循環時間鎖定的單列時長；不對既有時長加上 1,440 分鐘上限。 */
+function durationAdjustmentTarget(row,mode,probe){
+ const current=durationValue(row.duration),residues=[];
+ for(let duration=0;duration<1440;duration++)if(!probe(duration))residues.push(duration);
+ const lower=residues.map(duration=>duration+Math.floor((current-1-duration)/1440)*1440).filter(duration=>duration>=0&&duration<current);
+ const higher=residues.map(duration=>duration+Math.ceil((current+1-duration)/1440)*1440).filter(duration=>duration>current);
+ if(mode==="shrink")return lower.length?Math.max(...lower):null;
+ if(mode==="expand")return higher.length?Math.min(...higher):null;
+ const options=lower.concat(higher);return options.length?options.reduce((best,value)=>Math.abs(value-current)<Math.abs(best-current)?value:best):null;
+}
+/* 將鎖定所需值和目前值的差異轉為排序可調整時長的方向。 */
+function structuralAdjustmentMode(conflict,rows){
+ const delta=conflict&&conflict.lockedValue&&conflict.requiredValue?signedTimeDelta(conflict.lockedValue,conflict.requiredValue):0,anchorIndex=rows&&rows.findIndex(row=>row.id===conflict.anchorRowId),conflictIndex=rows&&rows.findIndex(row=>row.id===conflict.lockedRowId),afterAnchor=anchorIndex>=0&&conflictIndex>anchorIndex;
+ return(afterAnchor?delta>0:delta<0)?"shrink":"expand";
+}
+/* 依排序衝突兩端鎖定欄位界定候選：前端 start 與尾端 end 可連同中間列調整。 */
+function reorderCandidateIds(rows,conflict){
+ const anchorIndex=rows.findIndex(row=>row.id===conflict.anchorRowId),conflictIndex=rows.findIndex(row=>row.id===conflict.lockedRowId);if(anchorIndex<0||conflictIndex<0)return[];
+ const first=Math.min(anchorIndex,conflictIndex),last=Math.max(anchorIndex,conflictIndex),ids=rows.slice(first+1,last).filter(row=>!row.pending).map(row=>row.id),firstRow=rows[first],lastRow=rows[last];if(firstRow.lock==="start")ids.unshift(firstRow.id);if(lastRow.lock==="end")ids.push(lastRow.id);return ids;
+}
+/* 只取造成結構衝突的兩個時間鎖定區間內行程，避免調整區間外不相關的時長。 */
+function structuralCandidateIds(rows,conflict,includeFirstStart=true){
+ const locked=rows.map((row,index)=>({row,index})).filter(item=>!item.row.pending&&["start","end"].includes(item.row.lock)),conflictIndex=rows.findIndex(row=>row.id===conflict.lockedRowId),other=locked.filter(item=>item.index!==conflictIndex).sort((left,right)=>Math.abs(left.index-conflictIndex)-Math.abs(right.index-conflictIndex))[0];
+ if(conflictIndex<0||!other)return[];const first=Math.min(conflictIndex,other.index),last=Math.max(conflictIndex,other.index),ids=rows.slice(first+1,last).filter(row=>!row.pending).map(row=>row.id),firstLocked=locked.find(item=>item.index===first),lastLocked=locked.find(item=>item.index===last);if(includeFirstStart&&firstLocked&&firstLocked.row.lock==="start")ids.unshift(firstLocked.row.id);if(lastLocked&&lastLocked.row.lock==="end")ids.push(lastLocked.row.id);return ids;
+}
+/* 在完整操作副本上逐筆試算，列出可由單一未鎖定時長行程吸收的候選。 */
+function structuralDurationCandidates(beforeState,candidateIds,mode,attempt){
+ const originalState=state,beforeRows=beforeState.days[beforeState.activeDate]||[];
+ const candidates=candidateIds.map(id=>beforeRows.find(row=>row.id===id)).filter(row=>row&&!row.pending&&row.lock!=="duration").map(row=>{
+  const target=durationAdjustmentTarget(row,mode,duration=>{state=structuredClone(beforeState);const conflict=attempt({id:row.id,duration},true);state=originalState;return !!conflict;});return{row,target};
+ }).filter(item=>item.target!==null);state=originalState;return candidates;
+}
+/* 顯示共用單列時長調整燈箱，確認後才套用原本結構操作與候選時長。 */
+function openDurationAdjustmentDialog(config){
+ const {operation,candidates,locked,apply,cancelText="取消",onCancel,onNoCandidates}=config,displayName=value=>value.length>20?value.slice(0,20)+"...":value,cause=locked.length?"由於"+locked.map(item=>"「"+displayName(String(item.content||"").trim()||"此行程")+"」的「"+fieldLabel(item.lock)+"」").join("及")+"已鎖定，造成時間衝突。":"造成時間衝突。";
+ if(!candidates.length){onNoCandidates?.();openDialog("時間衝突",cause+"目前沒有一筆行程能單獨調整總時長並同時保留所有開始／結束時間鎖定。",[{text:cancelText,cls:"",run:onCancel||(()=>render())}]);return;}
+ const content=document.createElement("div"),reason=document.createElement("p"),adjustment=document.createElement("p"),wheel=document.createElement("div"),suffix=document.createElement("span"),preview=document.createElement("p");let selected=0,dragStart=null,dragging=false;content.className="pending-duration-content";reason.className="pending-duration-reason";reason.textContent="由於";locked.forEach((item,index)=>{const part=document.createElement("span"),connector=document.createElement("span");part.className="pending-duration-lock";part.textContent="「"+displayName(String(item.content||"").trim()||"此行程")+"」的「"+fieldLabel(item.lock)+"」";connector.textContent=index===locked.length-1?"已鎖定，造成時間衝突。":"及";reason.append(part,connector);});adjustment.className="pending-duration-adjustment";adjustment.textContent="請調整 ";suffix.textContent=operation==="放置待放置行程"?" 時長，以便放置行程。":" 時長，以便完成「"+operation+"」。";preview.className="pending-duration-result";wheel.className="pending-duration-wheel";wheel.tabIndex=0;wheel.setAttribute("role","listbox");
  const select=index=>{selected=Math.max(0,Math.min(candidates.length-1,index));[...wheel.children].forEach((item,itemIndex)=>{item.classList.toggle("selected",itemIndex===selected);item.setAttribute("aria-selected",itemIndex===selected?"true":"false");});wheel.scrollTop=selected*34;const item=candidates[selected],fullName=String(item.row.content||"").trim()||"此行程",name=displayName(fullName);preview.title=fullName;preview.textContent="「"+name+"」總時長："+durationValue(item.row.duration)+" 分鐘 → "+item.target+" 分鐘。";};
  candidates.forEach((item,index)=>{const option=document.createElement("button"),fullName=String(item.row.content||"").trim()||"此行程",name=displayName(fullName);option.type="button";option.className="pending-duration-option";option.title=fullName;option.textContent=name;option.addEventListener("click",()=>select(index));wheel.append(option);});
  wheel.addEventListener("wheel",event=>{event.preventDefault();select(selected+(event.deltaY>0?1:-1));},{passive:false});wheel.addEventListener("pointerdown",event=>{dragStart=event.clientY;dragging=false;});wheel.addEventListener("pointermove",event=>{if(dragStart===null)return;const steps=Math.trunc((dragStart-event.clientY)/28);if(steps){if(!dragging){wheel.setPointerCapture?.(event.pointerId);dragging=true;}select(selected+steps);dragStart=event.clientY;}});wheel.addEventListener("pointerup",()=>{dragStart=null;dragging=false;});wheel.addEventListener("keydown",event=>{const keys={ArrowUp:-1,ArrowDown:1,Home:-selected,End:candidates.length-1-selected};if(!(event.key in keys))return;event.preventDefault();select(selected+keys[event.key]);});adjustment.append(wheel,suffix);content.append(reason,adjustment,preview);requestAnimationFrame(()=>select(0));
- openDialog("時間衝突",content,[{text:"套用調整",cls:"primary",run:()=>{const item=candidates[selected];state.days[state.activeDate]=structuredClone(before);const result=tryPlacePending(row.id,item.row.id,item.target);if(result.conflict){state.days[state.activeDate]=before;render();openDialog("時間衝突","目前條件已變更，請重新選擇放置方式。",[{text:"取消放置",cls:"",run:()=>render()}]);return;}clearConflictsAfterSuccess();render();showToast("已調整時長並放置行程");}},{text:"取消放置",cls:"",actionClass:"dialog-cancel",run:()=>{state.days[state.activeDate]=before;render();}}],{actionsClass:"pending-duration-actions"});
+ openDialog("時間衝突",content,[{text:"套用調整",cls:"primary",run:()=>apply(candidates[selected])},{text:cancelText,cls:"",actionClass:"dialog-cancel",run:onCancel||(()=>render())}],{actionsClass:"pending-duration-actions"});
+}
+/* 顯示可單獨吸收待放置衝突的行程選擇，並即時預覽原／新分鐘數。 */
+function openPendingDurationDialog(row,before,conflict){
+ const candidates=before.filter(item=>!item.pending&&item.lock!=="duration").concat(before.find(item=>item.id===row.id)).filter(Boolean).map(item=>({row:item,target:pendingDurationTarget(before,row.id,item.id)})).filter(item=>item.target!==null),locked=before.filter(item=>!item.pending&&["start","end"].includes(item.lock));
+ openDurationAdjustmentDialog({operation:"放置待放置行程",candidates,locked,cancelText:"取消放置",onNoCandidates:()=>{state.days[state.activeDate]=before;render();},onCancel:()=>{state.days[state.activeDate]=before;render();},apply:item=>{state.days[state.activeDate]=structuredClone(before);const result=tryPlacePending(row.id,item.row.id,item.target);if(result.conflict){state.days[state.activeDate]=before;render();openDurationAdjustmentDialog({operation:"放置待放置行程",candidates:[],locked,cancelText:"取消放置",onCancel:()=>render()});return;}clearConflictsAfterSuccess();render();showToast("已調整時長並放置行程");}});
 }
 /* 將待放置行程接到相鄰正式時間鏈；無法維持原時長時改提供可行的單列時長選擇。 */
 function placePending(row){
  const rows=activeRows(),index=rows.indexOf(row);if(index<0)return;const before=structuredClone(rows),result=tryPlacePending(row.id,"",null);
- if(result.conflict){state.days[state.activeDate]=before;openPendingDurationDialog(row,before);return;}
+ if(result.conflict){state.days[state.activeDate]=before;openPendingDurationDialog(row,before,result.conflict);return;}
  clearConflictsAfterSuccess();render();showToast("行程已放置並加入時間連動");
 }
 
