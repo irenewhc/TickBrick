@@ -64,6 +64,7 @@ vm.runInContext(`
  function recordConflict(){}
  function presentOperationConflict(){}
  function openConflictModal(){}
+ function recalculateStructuralChain(){return null;}
  ${functionSource("moveRowToStaging")}
  ${functionSource("moveStagingRowToDay")}
  ${functionSource("moveToDate")}
