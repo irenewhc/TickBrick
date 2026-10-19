@@ -166,6 +166,11 @@ vm.runInContext(`
  function showToast(){}
  function recordConflict(){}
  function presentOperationConflict(){}
+ function crossesConflictBoundary(){return false;}
+ function activeConflictBoundaries(){return [];}
+ function conflictChainScope(rows){return {first:0,last:rows.length-1};}
+ function lockedChainBases(){return [];}
+ function recalculateConflictChain(){return null;}
  let draggedRow=null;
  ${reorderTimeAnchorIndex}
  ${recalculateReorderedDayRow}

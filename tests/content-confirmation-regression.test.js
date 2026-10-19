@@ -32,10 +32,27 @@ vm.createContext(context);
 vm.runInContext(`
  const DEFAULT_CATEGORIES=[];
  function durationValue(value,fallback=60){const number=Number(value);return Number.isFinite(number)&&number>=0?number:fallback;}
+ function timeToMin(value){const [hours,minutes]=String(value||"00:00").split(":").map(Number);return hours*60+minutes;}
+ function timeAfter(start,duration){const total=(timeToMin(start)+Number(duration))%1440;return String(Math.floor(total/60)).padStart(2,"0")+":"+String(total%60).padStart(2,"0");}
+ function durationBetween(start,end){const duration=timeToMin(end)-timeToMin(start);return duration>=0?duration:duration+1440;}
  function validDate(value){return /^\\d{4}-\\d{2}-\\d{2}$/.test(value);}
  function makeId(){return "generated";}
  ${functionSource("blankState")}
+ ${functionSource("normalizeNumericInput")}
  ${functionSource("makeRow")}
+ ${functionSource("durationWithinLimit")}
+ ${functionSource("durationLimitConflict")}
+ ${functionSource("syncDurationLimitConflicts")}
+ ${functionSource("middleEndBeforeStartConflicts")}
+ ${functionSource("middleEndBeforeStartConflict")}
+ ${functionSource("syncMiddleEndBeforeStartConflicts")}
+ ${functionSource("timelineAtomicConflicts")}
+ ${functionSource("normalizeDirectConflictMarkers")}
+ ${functionSource("isAutomaticTimelineConflict")}
+ ${functionSource("isTimeBoundary")}
+ ${functionSource("deriveConflictBoundary")}
+ ${functionSource("hydrateConflictBoundaries")}
+ ${functionSource("rebuildAutomaticConflicts")}
  ${functionSource("normalizeState")}
  globalThis.normalize=normalizeState;
  globalThis.make=makeRow;
@@ -48,6 +65,8 @@ assert.equal(oldData.staging[0].confirmed, false, "舊暫存資料缺少欄位�
 const confirmedData = context.normalize({ dates:["2026-10-07"], activeDate:"2026-10-07", days:{"2026-10-07":[{id:"yes",content:"已勾選",confirmed:true}]}, staging:[] });
 assert.equal(confirmedData.days["2026-10-07"][0].confirmed, true, "JSON 匯入必須保留待確認值");
 assert.match(JSON.stringify(confirmedData), /"confirmed":true/, "JSON 備份序列化必須包含待確認值");
+const legacyBoundaryData = context.normalize({ dates:["2026-10-07"], activeDate:"2026-10-07", days:{"2026-10-07":[{id:"A",start:"09:00",end:"10:00",duration:60},{id:"B",start:"10:00",end:"12:00",duration:60},{id:"C",start:"13:00",end:"14:00",duration:60}]}, staging:[], conflicts:[{id:"legacy",date:"2026-10-07",lockedRowId:"B",lockedField:"",directRowId:"B",directField:"end"}] });
+assert.deepEqual(JSON.parse(JSON.stringify(legacyBoundaryData.conflicts[0].boundary)), {leftRowId:"B",rightRowId:"C",owner:"right"}, "舊備份的黃色直接衝突必須依實際不連續行程補齊時間鏈邊界");
 
 const moveContext = { structuredClone };
 vm.createContext(moveContext);
@@ -65,6 +84,13 @@ vm.runInContext(`
  function presentOperationConflict(){}
  function openConflictModal(){}
  function recalculateStructuralChain(){return null;}
+ function recalculateMoveSourceChain(){return null;}
+ function moveSourceCandidateIds(){return [];}
+ function conflictChainScope(rows){return {first:0,last:rows.length-1};}
+ function originConflictFor(){return null;}
+ function relocateConflictBoundariesAfterRemoval(){}
+ function chooseOriginRemovalAnchor(){}
+ function openCompletedRemovalConflict(){}
  ${functionSource("moveRowToStaging")}
  ${functionSource("moveStagingRowToDay")}
  ${functionSource("moveToDate")}

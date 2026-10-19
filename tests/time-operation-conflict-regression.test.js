@@ -32,14 +32,10 @@ vm.runInContext(`
 
 const cases = [
  ["start-all", "start", "09:30", "P", "end", "更新前後行程時間"],
- ["start-previous", "start", "09:30", "P", "end", "更新上一項行程的時長"],
  ["start-up", "start", "09:30", "P", "end", "更新之前行程的時間"],
  ["end-all", "end", "10:30", "P", "end", "更新前後行程時間"],
- ["end-next", "end", "10:30", "N", "start", "更新下一項行程的時長"],
  ["end-down", "end", "10:30", "N", "start", "更新之後行程的時間"],
- ["duration-previous", "duration", 90, "P", "end", "更新上一項行程的時長"],
  ["duration-up", "duration", 90, "P", "end", "更新之前行程的時間"],
- ["duration-next", "duration", 90, "N", "start", "更新下一項行程的時長"],
  ["duration-down", "duration", 90, "N", "start", "更新之後行程的時間"]
 ];
 

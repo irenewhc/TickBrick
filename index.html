@@ -23,7 +23,9 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- 應用程式主畫面：頁首操作、日期行程與暫存區。 -->
   <main class="container">
+    <!-- 品牌與全域操作：日期、新增行程及備份匯出。 -->
     <header class="page-header">
       <div><h1 class="brand-title"><span class="brand-logo-crop"><img src="LOGO_橫_字.png" alt="行程樂高 TickBrick"></span></h1><p class="subtitle">怎麼玩、怎麼動，行程都由你掌握！</p></div>
       <div class="header-actions">
@@ -47,10 +49,12 @@
       </div>
     </header>
 
+    <!-- 日期頁籤導覽。 -->
     <nav class="date-navigation" aria-label="行程日期">
       <div id="dateTabs" class="date-tabs" role="tablist"></div>
     </nav>
 
+    <!-- 目前日期的正式行程表。 -->
     <section class="day-section">
       <div class="section-heading"><div><h2 id="activeDateTitle"></h2><p id="daySummary"></p></div></div>
       <div class="table-wrap">
@@ -62,15 +66,19 @@
       </div>
     </section>
 
+    <!-- 尚未放入正式時間鏈的共用暫存區。 -->
     <section id="stagingSection" class="staging-section">
       <div class="section-heading"><div><h2>行程暫存區</h2><p class="staging-drop-hint">＊暫存項目確認放置到行程後才會加入時間連動。</p><p class="staging-drop-hint">＊可直接將行程直接拖曳到這裡。</p></div><span id="stagingCount" class="count-badge"></span></div>
       <div class="table-wrap"><table><thead><tr><th class="order-col">排序</th><th class="start-col">開始時間</th><th class="end-col">結束時間</th><th class="duration-col">總時長</th><th class="category-col">類別</th><th>行程內容</th><th class="move-col">移動</th><th class="delete-col">刪除</th></tr></thead><tbody id="stagingBody"></tbody></table><div id="emptyStaging" class="empty-state" hidden>暫存區目前是空的。</div></div>
     </section>
 
+    <!-- 類別顏色設定。 -->
     <section class="category-settings"><details><summary>類別顏色</summary><div id="categoryColors" class="category-color-list"></div></details></section>
   </main>
 
+  <!-- 共用確認、選擇與衝突提示燈箱。 -->
   <dialog id="appDialog" class="app-dialog"><form method="dialog"><h2 id="dialogTitle"></h2><div id="dialogContent"></div><div id="dialogActions" class="dialog-actions"></div></form></dialog>
+  <!-- 短暫系統提示。 -->
   <div id="toast" role="status" aria-live="polite"></div>
   <script src="script.js" defer></script>
 </body>

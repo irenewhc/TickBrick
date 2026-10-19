@@ -65,7 +65,7 @@ lockedRows.find(row=>row.id==="D").lock="none";
 api.refreshConflicts();
 assert.equal(api.hasUnresolvedConflicts(), true, "解除所有鎖定但尚未把實際時間鏈串接回來時，衝突不得清除");
 api.executeTimeOption(lockedRows.find(row=>row.id==="A"), 0, "end", "23:30", { key: "end-down" });
-assert.equal(api.hasUnresolvedConflicts(), false, "使用相關時間欄位重新串接實際下游時間鏈後，才可清除衝突");
+assert.equal(api.hasUnresolvedConflicts(), true, "重新串接若使中間行程跨午夜，核心規則仍必須保留衝突");
 
 api.state().days["2026-10-04"] = [
  {id:"A",start:"06:00",end:"07:00",duration:60,lock:"start",pending:false},
@@ -93,13 +93,12 @@ api.state().days["2026-10-04"] = [
  {id:"B",start:"07:00",end:"08:00",duration:1500,lock:"none",pending:false}
 ];
 api.state().conflicts=[];
-api.executeTimeOption(api.state().days["2026-10-04"][1], 1, "start", "07:10", { key: "start-all" });
+assert.equal(api.hasUnresolvedConflicts(), true, "舊資料的 1,500 分鐘時長必須建立上限衝突並阻擋匯出");
 lockedRows = api.state().days["2026-10-04"];
-assert.equal(api.hasUnresolvedConflicts(), true, "超過 24 小時的時長遇到鎖定衝突時仍須保留衝突");
-lockedRows.find(row=>row.id==="A").lock="none";
 api.executeTimeOption(lockedRows.find(row=>row.id==="A"), 0, "start", "06:10", { key: "start-all" });
-lockedRows = api.state().days["2026-10-04"];
-assert.deepEqual(lockedRows.map(row=>[row.start,row.end,row.duration]), [["06:10","07:10",60],["07:10","08:10",1500]], "1,500 分鐘時長必須依 24 小時循環推算為 07:10–08:10");
-assert.equal(api.hasUnresolvedConflicts(), false, "超過 1,440 分鐘的相關行程串接完成後也必須清除衝突");
+assert.deepEqual(api.state().days["2026-10-04"].find(row=>row.id==="B"), {id:"B",start:"07:00",end:"08:00",duration:1500,lock:"none",pending:false}, "超上限行程不得參與其他列的自動時間連動或被自動改寫");
+api.state().days["2026-10-04"].find(row=>row.id==="B").duration=1440;
+api.hasUnresolvedConflicts();
+assert.equal(api.state().conflicts.some(item=>item.durationLimit), false, "修正回 1,440 分鐘後必須立即解除上限衝突，其餘既有時間衝突仍可保留");
 
 console.log("downstream circular-time regression test passed");

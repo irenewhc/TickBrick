@@ -348,7 +348,7 @@ h1 {
     gap: 12px;
     min-width: 174px;
     padding: 16px;
-    background: #fff;
+    background: linear-gradient(var(--color-purple-50), var(--color-purple-50)) center / 100% 34px no-repeat, #fff;
     border: 1px solid var(--color-gray-light);
     border-radius: 12px;
     box-shadow: 0 50px 50px #24344724;
@@ -581,15 +581,36 @@ td {
 
 .pending-duration-wheel {
     box-sizing: border-box;
-    width: 220px;
+    width: 180px;
     height: 102px;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
     display: inline-block;
     margin: 0 6px;
     vertical-align: middle;
     padding-inline: 10px;
     color: var(--color-purple-900);
-    background: #fff;
+    background: linear-gradient(var(--color-purple-50), var(--color-purple-50)) center / 100% 34px no-repeat, #fff;
+    border: 0;
+    outline: none
+}
+
+.pending-duration-mode-wheel {
+    box-sizing: border-box;
+    width: 180px;
+    height: 102px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    display: inline-block;
+    margin: 0 6px;
+    vertical-align: middle;
+    padding-inline: 10px;
+    color: var(--color-purple-900);
+    background: linear-gradient(var(--color-purple-50), var(--color-purple-50)) center / 100% 34px no-repeat, #fff;
     border: 0;
     outline: none
 }
@@ -599,8 +620,25 @@ td {
     outline-offset: 2px
 }
 
+.pending-duration-mode-wheel:focus-visible {
+    outline: 2px solid var(--color-purple-700);
+    outline-offset: 2px
+}
+
+.pending-duration-wheel.is-wide {
+    width: 350px
+}
+
 .pending-duration-wheel::before,
 .pending-duration-wheel::after {
+    content: "";
+    display: block;
+    height: 34px;
+    pointer-events: none
+}
+
+.pending-duration-mode-wheel::before,
+.pending-duration-mode-wheel::after {
     content: "";
     display: block;
     height: 34px;
@@ -624,14 +662,50 @@ td {
     cursor: pointer
 }
 
+.pending-duration-wheel::-webkit-scrollbar,
+.pending-duration-mode-wheel::-webkit-scrollbar,
+.time-option-wheel::-webkit-scrollbar { display: none }
+
 .pending-duration-option.selected {
     color: var(--color-purple-900);
-    background: var(--color-purple-50);
     opacity: 1
 }
 
+.pending-duration-wheel.is-scrolling .pending-duration-option.selected:not(.is-centered),
+.pending-duration-mode-wheel.is-scrolling .pending-duration-option.selected:not(.is-centered) { color: var(--color-gray-heavy); opacity: .38 }
+.pending-duration-option.is-centered { color: var(--color-purple-900); opacity: 1 }
+
 .pending-duration-reason {
     margin: 0
+}
+
+.dialog-warning-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px
+}
+
+.dialog-warning-title-icon {
+    color: var(--color-yellow)
+}
+
+.pending-duration-no-candidates-heading,
+.pending-duration-no-candidates-recovery {
+    margin: 0
+}
+
+.pending-duration-no-candidates-reasons {
+    margin: 12px 0 24px
+}
+
+.pending-duration-no-candidates-reason {
+    display: flex;
+    align-items: baseline;
+    gap: 8px
+}
+
+.pending-duration-no-candidates-icon {
+    color: var(--color-pink-heavy)
 }
 
 .pending-duration-adjustment {
@@ -645,11 +719,22 @@ td {
 
 .pending-duration-result {
     display: flex;
+    flex-direction: column;
     align-items: flex-start;
     height: 68px;
     margin: 0;
     overflow: hidden;
     color: var(--color-red)
+}
+
+.pending-duration-preview-entry {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.pending-duration-tag {
+    color: var(--color-pink-heavy);
 }
 
 .pending-duration-lock {
@@ -1009,6 +1094,14 @@ textarea {
     color: var(--color-purple-950);
 }
 
+.app-dialog.pending-duration-dialog {
+    width: min(900px, calc(100% - 30px));
+}
+
+.app-dialog.time-option-dialog {
+    width: min(900px, calc(100% - 30px));
+}
+
 .app-dialog::backdrop {
     background: #17243470
 }
@@ -1071,6 +1164,32 @@ textarea {
     margin-top: 0
 }
 
+/* 時間欄位多方式燈箱：句中滾輪只在可變位置出現，窄螢幕可自然換行。 */
+.time-option-copy { line-height: 2.35; color: var(--color-purple-950) }
+.time-option-intro { margin: 0 0 12px; line-height: 1.6 }
+.time-option-lock { color: var(--color-purple-700); font-weight: 500 }
+.time-option-wheel { box-sizing: border-box; display: inline-block; height: 102px; max-width: 100%; vertical-align: middle; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none; border: 0; border-radius: 6px; background: linear-gradient(var(--color-purple-50), var(--color-purple-50)) center / 100% 34px no-repeat, #fff }
+.time-option-wheel[data-position="0"] { width: 150px }
+.time-option-wheel[data-position="1"], .time-option-wheel[data-position="2"] { width: 350px }
+.time-option-wheel::before, .time-option-wheel::after { content: ""; display: block; height: 34px; pointer-events: none }
+.time-option-wheel:focus-visible { outline: 0 }
+.time-option-wheel-value { display: block; width: 100%; height: 34px; border: 0; background: transparent; color: var(--color-gray-heavy); font: inherit; padding: 0 9px; cursor: pointer; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .38 }
+.time-option-wheel-value.selected { color: var(--color-purple-900); opacity: 1 }
+.time-option-wheel.is-scrolling .time-option-wheel-value.selected:not(.is-centered) { color: var(--color-gray-heavy); opacity: .38 }
+.time-option-wheel-value.is-centered { color: var(--color-purple-900); opacity: 1 }
+.time-option-wheel-value:focus-visible { outline: 0 }
+.time-option-preview { --time-option-preview-scrollbar-reserve: 17px; display: flex; flex-direction: column; align-items: flex-start; box-sizing: border-box; height: calc(8em - 3.2px + var(--time-option-preview-scrollbar-reserve)); margin: 20px 0 0; overflow-x: auto; overflow-y: hidden; scrollbar-gutter: stable; color: var(--color-red); line-height: 1.6 }
+.time-option-preview-entry { display: flex; flex: 0 0 1.6em; align-items: baseline; width: 100%; min-width: 0; gap: 0; white-space: nowrap }
+.time-option-preview-tag { flex: 0 0 auto; margin-right: 8px; color: var(--color-pink-heavy) }
+.time-option-preview-name { flex: 0 0 auto; white-space: nowrap }
+.time-option-preview-name.is-long { display: grid; grid-template-columns: max-content minmax(0, max-content) max-content; flex: 0 1 auto; min-width: min-content }
+.time-option-preview-name-prefix, .time-option-preview-name-ellipsis { flex: 0 0 auto }
+.time-option-preview-name-suffix { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap }
+.time-option-preview-details { flex: 0 0 auto; white-space: nowrap }
+.time-option-preview-summary { flex: 0 0 auto; margin-top: auto; font-size: calc(1em - 2px) }
+.dialog-actions.time-option-wheel-actions { justify-content: flex-end; flex-wrap: wrap }
+.dialog-primary-hidden { visibility: hidden; pointer-events: none }
+
 .date-choice {
     display: grid;
     gap: 10px
@@ -1096,6 +1215,22 @@ textarea {
 .conflict-message {
     color: var(--color-red);
     font-weight: 700
+}
+
+.conflict-reasons {
+    display: grid;
+    gap: 8px
+}
+
+.conflict-reason {
+    display: flex;
+    align-items: baseline;
+    gap: 8px
+}
+
+.conflict-reason-icon {
+    flex: 0 0 auto;
+    color: var(--color-pink-heavy)
 }
 
 .conflict-hint {
@@ -1169,7 +1304,7 @@ textarea {
     transform: translate(-50%, 15px);
     opacity: 0;
     pointer-events: none;
-    background: var(--color-purple-200);
+    background: var(--color-yellow-bg);
     color: var(--color-purple-900);
     padding: 11px 18px;
     border-radius: 9px;
@@ -1321,3 +1456,9 @@ textarea {
         margin: 0
     }
 }
+.pending-duration-preview-entry { min-width: 0; max-width: 100%; white-space: nowrap }
+.pending-duration-preview-name { flex: 0 0 auto; white-space: nowrap }
+.pending-duration-preview-name.is-long { display: grid; grid-template-columns: max-content minmax(0, max-content) max-content; flex: 0 1 auto; min-width: min-content }
+.pending-duration-preview-name-prefix, .pending-duration-preview-name-ellipsis { flex: 0 0 auto }
+.pending-duration-preview-name-suffix { min-width: 0; overflow: hidden; white-space: nowrap }
+.pending-duration-preview-details { flex: 0 0 auto; white-space: nowrap }
