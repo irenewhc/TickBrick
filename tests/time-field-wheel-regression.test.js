@@ -7,6 +7,7 @@ const css=fs.readFileSync("style.css","utf8");
 const between=(from,to)=>source.slice(source.indexOf(from),source.indexOf(to,source.indexOf(from)));
 const makeRowSource=between("function makeRow", "/* 載入目前或舊版瀏覽器資料");
 const timeLogic=between("function getList", "/* 行程操作");
+const durationDialog=between("function openDurationAdjustmentDialog", "function openPendingDurationDialog");
 const addRowSource=between("function addRow", "/* 依行程列動作分派");
 const conflictCopy=between("function directConflictDescription", "/* 以統一鎖定衝突");
 const openDialogSource=between("function openDialog", "function askConfirm");
@@ -72,7 +73,7 @@ function makeDom(){const document={frames:[],activeElement:null,createElement:ta
 function rows(){return [{id:"P",content:"前",start:"07:00",end:"08:00",duration:60,lock:"none",pending:false},{id:"A",content:"本",start:"08:00",end:"09:00",duration:60,lock:"none",pending:false},{id:"N",content:"後",start:"09:00",end:"10:00",duration:60,lock:"none",pending:false}];}
 function makeRuntime(initial=rows(),timers={}){
  const {nodes,document}=makeDom(),calls={persist:0,render:0,renderDay:0,toasts:[]},context={structuredClone,document,requestAnimationFrame:fn=>document.frames.push(fn),clearTimeout:timers.clearTimeout||(()=>{}),setTimeout:timers.setTimeout||(fn=>{fn();return 1;}),__calls:calls};vm.createContext(context);
- vm.runInContext(`let state={activeDate:"2026-10-09",days:{"2026-10-09":${JSON.stringify(initial)}},staging:[],conflicts:[]};function activeRows(){return state.days[state.activeDate]||[];}function persist(){calls.persist++;}function render(){calls.render++;}function renderDay(){calls.renderDay++;}function showToast(message){calls.toasts.push(message);}function makeId(){return "test-id";}${makeRowSource}function hasUnresolvedConflicts(){refreshConflicts();return state.conflicts.length>0;}const calls=globalThis.__calls;${timeLogic}${addRowSource}${conflictCopy}${openDialogSource}globalThis.api={state:()=>state,calls:()=>calls,timeOptions,timeOptionParts,previewTimeOption,previewCompanionTime,applyTimeOption,executeTimeOption,handleTimeEdit,openTimeOptionWheel,keepTimeEditConflict,timeOptionPreviewSummary,noTimeOptionMessage,appendNoTimeOptionMessage,lockedBoundaryTimeEditScope,matchingLockedBoundaryTrial,hasUnresolvedConflicts,openDialog,openConflictModal,directConflictDescription,directConflictRowIds,hasConflictForRow,hasConflictForInput,addRow,recordConflict};`,context);
+ vm.runInContext(`let state={activeDate:"2026-10-09",days:{"2026-10-09":${JSON.stringify(initial)}},staging:[],conflicts:[]};function activeRows(){return state.days[state.activeDate]||[];}function persist(){calls.persist++;}function render(){calls.render++;}function renderDay(){calls.renderDay++;}function showToast(message){calls.toasts.push(message);}function makeId(){return "test-id";}${makeRowSource}function hasUnresolvedConflicts(){refreshConflicts();return state.conflicts.length>0;}const calls=globalThis.__calls;${timeLogic}${durationDialog}${addRowSource}${conflictCopy}${openDialogSource}globalThis.api={state:()=>state,calls:()=>calls,timeOptions,timeOptionParts,previewTimeOption,previewCompanionTime,applyTimeOption,executeTimeOption,handleTimeEdit,openTimeOptionWheel,openDurationAdjustmentDialog,keepTimeEditConflict,timeOptionPreviewSummary,noTimeOptionMessage,appendNoTimeOptionMessage,lockedBoundaryTimeEditScope,matchingLockedBoundaryTrial,hasUnresolvedConflicts,openDialog,openConflictModal,directConflictDescription,directConflictRowIds,hasConflictForRow,hasConflictForInput,addRow,recordConflict};`,context);
  return {api:context.api,nodes,document,calls};
 }
 
@@ -241,6 +242,24 @@ const front=makeRuntime([{id:"P",content:"前方",start:"07:00",end:"08:00",dura
 {
  const runtime=makeRuntime(),row=runtime.api.state().days["2026-10-09"][1],options=runtime.api.timeOptions(row,1,"start").filter(option=>option.key!=="start-self-end"&&option.key!=="start-up"),previews=options.map(option=>runtime.api.previewTimeOption(row,1,"start","08:10",option));runtime.api.openTimeOptionWheel(row,1,"start","08:10",options,previews);
  const content=runtime.nodes.dialogContent.children[0],first=content.children[1].firstChild,second=content.children[3].firstChild;first.fire("wheel",{deltaY:34,deltaMode:1,preventDefault(){}});assert.equal(second.parentNode,null,"前段切換造成唯一後段時，舊後段輪盤必須卸載");runtime.nodes.dialogActions.children[0].fire("click");const rows=runtime.api.state().days["2026-10-09"];assert.deepEqual(rows.map(item=>[item.id,item.start,item.end,item.duration]),[["P","07:00","08:10",70],["A","08:10","09:00",50],["N","09:00","10:00",60]],"套用時不得讓卸載後段輪盤覆蓋目前的指定時長候選");
+}
+
+// 4ab. 套用前必須先確認所有仍掛載的時間欄位輪盤；關閉燈箱後 scrollTop 歸零不能覆寫使用者已選方案。
+{
+ const runtime=makeRuntime([{id:"P",content:"HOSTEL 早餐",start:"06:20",end:"08:20",duration:120,lock:"none",pending:false},{id:"T",content:"旅館 → 西野神社",start:"08:20",end:"09:20",duration:60,lock:"none",pending:false},{id:"N",content:"西野神社",start:"09:20",end:"10:20",duration:60,lock:"none",pending:false}]),row=runtime.api.state().days["2026-10-09"][1];
+ runtime.api.handleTimeEdit("T","duration",80);const content=runtime.nodes.dialogContent.children[0],third=content.querySelector('.time-option-wheel[data-position="2"]');
+ third.children.find(button=>button.textContent==="之前行程的時間").fire("click");assert.match(content.children.at(-1).textContent,/開始時間 08:20→08:00/,"選取更新之前行程時間時，確認前預覽必須維持本列開始時間提前");
+ const close=runtime.nodes.appDialog.close.bind(runtime.nodes.appDialog);runtime.nodes.appDialog.close=()=>{all(content,node=>node.classList?.contains("time-option-wheel")).forEach(wheel=>wheel.scrollTop=0);close();};
+ runtime.nodes.dialogActions.children[0].fire("click");assert.deepEqual(runtime.api.state().days["2026-10-09"].map(item=>[item.id,item.start,item.end,item.duration]),[["P","06:00","08:00",120],["T","08:00","09:20",80],["N","09:20","10:20",60]],"燈箱關閉後輪盤位置歸零時，套用仍須使用關閉前選定的之前行程時間方案");
+}
+
+// 4ac. 結構性時長調整燈箱也必須在關閉前確認目前指定行程，不能回退到第一筆。
+{
+ const runtime=makeRuntime(),rows=runtime.api.state().days["2026-10-09"],applied=[];
+ runtime.api.openDurationAdjustmentDialog({operation:"測試",candidates:[{row:rows[0],target:30},{row:rows[2],target:40}],locked:[],cancelText:"取消",apply:item=>applied.push(item)});
+ const content=runtime.nodes.dialogContent.children[0],wheel=content.querySelector(".pending-duration-wheel");wheel.children[1].fire("click");
+ const close=runtime.nodes.appDialog.close.bind(runtime.nodes.appDialog);runtime.nodes.appDialog.close=()=>{all(content,node=>node.classList?.contains("pending-duration-wheel")).forEach(item=>item.scrollTop=0);close();};
+ runtime.nodes.dialogActions.children[0].fire("click");assert.equal(applied[0].row.id,"N","結構性燈箱關閉後輪盤位置歸零時，套用仍須使用關閉前選定的行程");
 }
 
 
