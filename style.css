@@ -485,7 +485,8 @@ h1 {
 }
 
 /* 行程欄位、鎖定與操作按鈕 */
-.conflict-field-highlight {
+.conflict-field-highlight,
+.time-input-invalid {
     background: var(--color-yellow-bg);
     /* border: 1px solid var(--color-yellow-hover); */
     font-weight: 700
