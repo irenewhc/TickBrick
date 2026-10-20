@@ -54,14 +54,14 @@
       <div id="dateTabs" class="date-tabs" role="tablist"></div>
     </nav>
 
-    <!-- 目前日期的正式行程表。 -->
+    <!-- 目前日期的正式行程 Grid 清單。 -->
     <section class="day-section">
       <div class="section-heading"><div><h2 id="activeDateTitle"></h2><p id="daySummary"></p></div></div>
-      <div class="table-wrap">
-        <table id="itineraryTable">
-          <thead><tr><th class="order-col">排序</th><th class="start-col">開始時間</th><th class="end-col">結束時間</th><th class="duration-col">總時長</th><th class="category-col">類別</th><th>行程內容</th><th class="move-col">移動</th><th class="delete-col">刪除</th></tr></thead>
-          <tbody id="tableBody"></tbody>
-        </table>
+      <div class="schedule-wrap">
+        <div id="itineraryGrid" class="schedule-grid" role="table" aria-label="當日行程">
+          <div class="schedule-header" role="row"><div class="order-col" role="columnheader">排序</div><div class="start-col" role="columnheader">開始時間</div><div class="end-col" role="columnheader">結束時間</div><div class="duration-col" role="columnheader">總時長</div><div class="category-col" role="columnheader">類別</div><div role="columnheader">行程內容</div><div class="move-col" role="columnheader">移動</div><div class="delete-col" role="columnheader">刪除</div></div>
+          <div id="tableBody" class="schedule-body" role="rowgroup"></div>
+        </div>
         <div id="emptyDay" class="empty-state" hidden>這一天目前沒有行程。你可以新增行程，或將暫存項目放到這一天。</div>
       </div>
     </section>
@@ -69,7 +69,7 @@
     <!-- 尚未放入正式時間鏈的共用暫存區。 -->
     <section id="stagingSection" class="staging-section">
       <div class="section-heading"><div><h2>行程暫存區</h2><p class="staging-drop-hint">＊暫存項目確認放置到行程後才會加入時間連動。</p><p class="staging-drop-hint">＊可直接將行程直接拖曳到這裡。</p></div><span id="stagingCount" class="count-badge"></span></div>
-      <div class="table-wrap"><table><thead><tr><th class="order-col">排序</th><th class="start-col">開始時間</th><th class="end-col">結束時間</th><th class="duration-col">總時長</th><th class="category-col">類別</th><th>行程內容</th><th class="move-col">移動</th><th class="delete-col">刪除</th></tr></thead><tbody id="stagingBody"></tbody></table><div id="emptyStaging" class="empty-state" hidden>暫存區目前是空的。</div></div>
+      <div class="schedule-wrap"><div id="stagingGrid" class="schedule-grid" role="table" aria-label="行程暫存區"><div class="schedule-header" role="row"><div class="order-col" role="columnheader">排序</div><div class="start-col" role="columnheader">開始時間</div><div class="end-col" role="columnheader">結束時間</div><div class="duration-col" role="columnheader">總時長</div><div class="category-col" role="columnheader">類別</div><div role="columnheader">行程內容</div><div class="move-col" role="columnheader">移動</div><div class="delete-col" role="columnheader">刪除</div></div><div id="stagingBody" class="schedule-body" role="rowgroup"></div></div><div id="emptyStaging" class="empty-state" hidden>暫存區目前是空的。</div></div>
     </section>
 
     <!-- 類別顏色設定。 -->

@@ -4,6 +4,7 @@ import vm from "node:vm";
 
 const source = fs.readFileSync("script.js", "utf8");
 const styles = fs.readFileSync("style.css", "utf8");
+const markup = fs.readFileSync("index.html", "utf8");
 
 function functionSource(name) {
  const start = source.indexOf("function " + name + "(");
@@ -26,6 +27,18 @@ const updateLogic = source.slice(updateStart, updateEnd);
 
 assert.match(styles, /\.date-tab\[draggable=true\][\s\S]*?touch-action: none/, "日期頁籤必須以 touch-action:none 保留長按後的 Pointer Events");
 assert.match(styles, /\.order-cell\s*\{\s*touch-action: none/, "行程排序欄必須以 touch-action:none 保留長按後的 Pointer Events");
+assert.match(markup, /class="schedule-grid" role="table"/, "正式與暫存清單必須使用具 table 語意的 Grid 容器");
+assert.match(markup, /class="schedule-header" role="row"/, "Grid 清單必須保留欄標題列語意");
+assert.match(styles, /\.schedule-header,\s*\.schedule-row\s*\{[\s\S]*?grid-template-columns:\s*50px 120px 120px 140px 100px minmax\(170px, 1fr\) 150px 50px/, "表頭與資料列必須共用八欄 Grid 配置");
+assert.match(styles, /\.schedule-grid\s*\{[\s\S]*?min-width:\s*1000px/, "窄畫面 Grid 容器必須涵蓋八欄固定寬度，讓橫向捲動包住完整列");
+assert.match(styles, /\.order-cell\s*\{[\s\S]*?touch-action:\s*none;[\s\S]*?flex-direction:\s*column/, "待放置列的排序圖示與標記必須維持上下排列");
+const rowMarkupSource = functionSource("rowMarkup");
+assert.match(rowMarkupSource, /role="row" data-id=/, "每筆行程必須輸出具 row 語意的 Grid 列");
+assert.equal((rowMarkupSource.match(/role="cell"/g) || []).length, 8, "每筆行程必須保留八個獨立欄位容器");
+assert.match(functionSource("bindRows"), /querySelectorAll\("\.schedule-row\[data-id\]"\)/, "列事件綁定必須改用 Grid 行程列 selector");
+assert.match(functionSource("updateTouchDrag"), /closest\("\.schedule-row\[data-id\]"\)/, "觸控拖曳命中必須改用 Grid 行程列 selector");
+assert.match(functionSource("createTouchPreview"), /preview\.append\(source\.cloneNode\(true\)\)/, "觸控拖曳預覽必須保留完整 Grid 行程列");
+assert.match(styles, /@media print \{[\s\S]*?\.schedule-header > div,\s*\.schedule-row > div\s*\{[\s\S]*?border: 1px solid #bbb/, "列印樣式必須套用 Grid 欄位框線");
 assert.match(touchLogic, /candidate\.scrolling=true/, "移動超過門檻後必須改為捲動狀態，不得啟動拖曳");
 assert.match(touchLogic, /window\.scrollBy\(0,scrollBy\)/, "候選取消後必須手動維持垂直頁面捲動");
 assert.match(touchLogic, /if\(candidate\.activated\)\{moveEvent\.preventDefault\(\);updateTouchDrag/, "長按啟動後必須抑制捲動並繼續更新拖曳目標");
@@ -123,7 +136,7 @@ const targetRow = {
  classList: { add() {} },
  getBoundingClientRect() { return { top: 0, height: 100 }; }
 };
-let hitElement = { closest(selector) { return selector === "tr[data-id]" ? targetRow : null; } };
+let hitElement = { closest(selector) { return selector === ".schedule-row[data-id]" ? targetRow : null; } };
 const targetContext = {
  document: {
   elementFromPoint() { return hitElement; },

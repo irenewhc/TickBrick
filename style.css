@@ -348,7 +348,7 @@ h1 {
     gap: 12px;
     min-width: 174px;
     padding: 16px;
-    background: linear-gradient(var(--color-purple-50), var(--color-purple-50)) center / 100% 34px no-repeat, #fff;
+    background: #fff;
     border: 1px solid var(--color-gray-light);
     border-radius: 12px;
     box-shadow: 0 50px 50px #24344724;
@@ -358,7 +358,7 @@ h1 {
     white-space: nowrap;
 }
 
-/* 行程區段與表格基礎 */
+/* 行程區段與八欄 Grid 基礎 */
 .day-section {
     margin-bottom: 32px;
 }
@@ -383,32 +383,42 @@ h1 {
     margin: 0
 }
 
-.table-wrap {
+.schedule-wrap {
     overflow-x: auto;
     border: 1px solid #e2e6eb;
     border-radius: 10px;
 }
 
-table {
+.schedule-grid {
     width: 100%;
-    border-collapse: collapse;
-    min-width: 760px
+    min-width: 1000px
 }
 
-th {
+.schedule-header,
+.schedule-row {
+    display: grid;
+    grid-template-columns: 50px 120px 120px 140px 100px minmax(170px, 1fr) 150px 50px;
+}
+
+.schedule-header {
     background: #222145;
     color: #fff;
     font-size: 13px;
     font-weight: 650;
-    padding: 12px 9px;
-    text-align: center
+    text-align: center;
 }
 
-td {
+.schedule-header > div {
+    padding: 12px 9px;
+}
+
+.schedule-row > div {
     border-top: 1px solid #e7eaee;
     padding: 9px 8px;
     text-align: center;
-    vertical-align: middle
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* 表格欄位寬度 */
@@ -503,7 +513,8 @@ td {
 }
 
 .order-cell {
-    touch-action: none
+    touch-action: none;
+    flex-direction: column
 }
 
 .touch-drag-preview {
@@ -517,11 +528,9 @@ td {
     transform: translate(-9999px, -9999px)
 }
 
-.touch-drag-preview table {
-    width: 100%;
+.touch-drag-preview .schedule-row {
     min-width: 0;
-    border-collapse: collapse;
-    background: #fff
+    background: #fff;
 }
 
 .touch-drag-preview .date-tab {
@@ -803,6 +812,7 @@ textarea {
 .content-editor {
     display: grid;
     gap: 5px;
+    width: 100%;
     text-align: left
 }
 
@@ -878,7 +888,8 @@ textarea {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 5px
+    gap: 5px;
+    width: 100%
 }
 
 .row-actions .button {
@@ -940,7 +951,7 @@ textarea {
     margin-bottom: 14px
 }
 
-.staging-section th {
+.staging-section .schedule-header {
     background: var(--color-purple-900)
 }
 
@@ -1432,21 +1443,21 @@ textarea {
         display: none
     }
 
-    .table-wrap {
+    .schedule-wrap {
         overflow: visible;
         border: 0
     }
 
-    table {
+    .schedule-grid {
         min-width: 0
     }
 
-    th,
-    td {
+    .schedule-header > div,
+    .schedule-row > div {
         border: 1px solid #bbb
     }
 
-    th {
+    .schedule-header {
         background: #ddd;
         color: #222;
         print-color-adjust: exact
