@@ -176,7 +176,7 @@ function bindRows(root,area){
   rowElement.addEventListener("dragover",e=>{const acceptsRow=draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"));if(acceptsRow){e.preventDefault();const after=e.clientY>=rowElement.getBoundingClientRect().top+rowElement.getBoundingClientRect().height/2;document.querySelectorAll(".touch-drop-before,.touch-drop-after").forEach(item=>item.classList.remove("touch-drop-before","touch-drop-after"));rowElement.classList.add(after?"touch-drop-after":"touch-drop-before");}});
   rowElement.addEventListener("dragleave",()=>rowElement.classList.remove("touch-drop-before","touch-drop-after"));
   rowElement.addEventListener("drop",e=>{const acceptsRow=draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"));if(!acceptsRow)return;e.preventDefault();e.stopPropagation();const after=e.clientY>=rowElement.getBoundingClientRect().top+rowElement.getBoundingClientRect().height/2;rowElement.classList.remove("touch-drop-before","touch-drop-after");if(area==="day"&&draggedRow.area==="staging"){const stagingRow=getRow("staging",draggedRow.id);if(stagingRow)moveStagingRowToDay(stagingRow,row.id,after);return;}requestReorder(area,draggedRow.id,row.id,after);});
-  rowElement.querySelectorAll("[data-field]").forEach(input=>{const field=input.dataset.field,timeRetry=area==="day"&&!row.pending&&["start","end","duration"].includes(field),submit=()=>{if(timeRetry)handleTimeEdit(row.id,field,input.value,input);else updateRow(area,row.id,field,input.value);};input.addEventListener("change",()=>{if(input.dataset.submittedValue===input.value){delete input.dataset.submittedValue;return;}submit();});if(timeRetry)input.addEventListener("keydown",event=>{if(event.key!=="Enter"||event.isComposing)return;event.preventDefault();input.dataset.submittedValue=input.value;submit();});});
+  rowElement.querySelectorAll("[data-field]").forEach(input=>{const field=input.dataset.field,timeRetry=area==="day"&&!row.pending&&["start","end","duration"].includes(field),submit=()=>{if(timeRetry)handleTimeEdit(row.id,field,input.value,input);else updateRow(area,row.id,field,input.value,input);};input.addEventListener("change",()=>{if(input.dataset.submittedValue===input.value){delete input.dataset.submittedValue;return;}submit();});if(timeRetry)input.addEventListener("keydown",event=>{if(event.key!=="Enter"||event.isComposing)return;event.preventDefault();input.dataset.submittedValue=input.value;submit();});});
   rowElement.querySelectorAll(".content-input").forEach(textarea=>{resizeContentTextarea(textarea);textarea.addEventListener("input",()=>resizeContentTextarea(textarea));});
   rowElement.querySelectorAll("[data-confirmed-toggle]").forEach(input=>input.addEventListener("change",()=>updateRow(area,row.id,"confirmed",input.checked)));
   rowElement.querySelectorAll("[data-lock]").forEach(button=>button.addEventListener("click",()=>{row.lock=row.lock===button.dataset.lock?"none":button.dataset.lock;clearConflictsAfterSuccess();renderDay();renderStaging();}));
@@ -419,11 +419,11 @@ function clearConflictsAfterSuccess(){refreshConflicts();persist();}
 /* 在衝突回復後重新寫回使用者直接輸入的欄位值。 */
 function setDirectValue(row,field,value){row[field]=value;}
 /* 更新非正式時間連動入口與待確認欄位，並在成功後重檢既有衝突。 */
-function updateRow(area,id,field,value){
+function updateRow(area,id,field,value,input){
  const row=getRow(area,id);if(!row)return;
  if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");render();return;}
  if(field==="confirmed"){row.confirmed=Boolean(value);}
- else if(field==="duration"){if(!durationWithinLimit(value)){showToast("單一行程最長為 1440 分鐘");render();return;}row.duration=durationValue(value,0);}
+ else if(field==="duration"){if(!durationWithinLimit(value)){input?.classList.add("duration-input-invalid");showToast("單一行程最長為 1440 分鐘");return;}input?.classList.remove("duration-input-invalid");row.duration=durationValue(value,0);}
  else if(field==="start"||field==="end"){row[field]=formatTime(value);}
  else row[field]=value;
  clearConflictsAfterSuccess();
@@ -804,8 +804,8 @@ const update=preservePosition=>{if(preservePosition!==0)renderWheel(first,0);if(
 /* 處理正式行程時間欄位輸入；鎖定前後完整串接且時長已吻合時只修正時長，否則決定首次連動或以副本預覽的選項燈箱。 */
 function handleTimeEdit(id,field,value,input){
  const row=getRow("day",id);if(!row)return;const lockedField=row.lock==="none"?"":row.lock;if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");renderDay();return;}
- if(field==="duration"&&!durationWithinLimit(value)){showToast("單一行程最長為 1440 分鐘");render();return;}
- const parsed=field==="duration"?durationValue(value,0):formatTime(value);if((field==="start"||field==="end")&&!parsed){input?.classList.add("time-input-invalid");showToast("請輸入有效時間");return;}input?.classList.remove("time-input-invalid");const rows=activeRows(),index=rows.indexOf(row),backup=structuredClone(rows);
+ if(field==="duration"&&!durationWithinLimit(value)){input?.classList.add("duration-input-invalid");showToast("單一行程最長為 1440 分鐘");return;}
+ const parsed=field==="duration"?durationValue(value,0):formatTime(value);if((field==="start"||field==="end")&&!parsed){input?.classList.add("time-input-invalid");showToast("請輸入有效時間");return;}if(field==="duration")input?.classList.remove("duration-input-invalid");else input?.classList.remove("time-input-invalid");const rows=activeRows(),index=rows.indexOf(row),backup=structuredClone(rows);
  if(field==="duration"&&(!row.start||!row.end)){row.duration=parsed;clearConflictsAfterSuccess();render();return;}
  const previousIndex=formalIndexBefore(index),nextIndex=formalIndexAfter(index),previous=rows[previousIndex],next=rows[nextIndex];
  if(field==="duration"&&!row.pending&&row.start&&row.end&&previous?.lock==="end"&&next?.lock==="start"&&previous.end===row.start&&row.end===next.start&&timeAfter(row.start,parsed)===row.end){row.duration=parsed;clearConflictsAfterSuccess();render();return;}
