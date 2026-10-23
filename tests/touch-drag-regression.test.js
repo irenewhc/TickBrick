@@ -73,7 +73,7 @@ function desktopRowHarness(area, dragged, targets) {
   getRow(sourceArea, id) { return sourceArea === "staging" ? (dragged.area === "staging" && dragged.id === id ? { id } : null) : { id }; },
   requestReorder(...args) { calls.push(["reorder", ...args]); },
   moveStagingRowToDay(...args) { calls.push(["staging", args[0].id, args[1], args[2]]); },
-  beginTouchDrag() {}, handleTimeEdit() {}, updateRow() {}, rowAction() {}, persist() {},
+  beginTouchDrag() {}, handleTimeEdit() {}, updateRow() {}, rowAction() {}, persist() {}, discardCategoryDrafts() {},
   state: { categories: [] }, draggedRow: dragged
  };
  vm.createContext(context);

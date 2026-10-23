@@ -59,6 +59,7 @@ vm.runInContext(`
  let draggedRow=null,effects={persist:0,render:0,toast:0};
  function makeId(){return "conflict-"+Math.random();}
  function activeRows(){return state.days[state.activeDate];}
+ function discardCategoryDrafts(){}
  function validDate(){return true;}
  function calendarMonthFor(){return {};}
  function dateLabel(value){return value;}

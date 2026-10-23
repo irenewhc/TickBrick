@@ -16,6 +16,7 @@ vm.runInContext(`
  ]},conflicts:[]};
  function makeId(){return "test-"+Math.random();}
  function activeRows(){return state.days[state.activeDate]||[];}
+ function discardCategoryDrafts(){}
  function persist(){}
  function render(){}
  function showToast(message){notices.push(message);}

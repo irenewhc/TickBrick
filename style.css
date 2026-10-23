@@ -979,24 +979,150 @@ textarea {
 }
 
 .category-color-list {
-    display: flex;
-    gap: 18px;
-    flex-wrap: wrap;
+    display: grid;
+    gap: 8px;
     padding: 16px 4px 2px
 }
 
-.category-color {
+.category-manager-row {
     display: flex;
-    align-items: center;
+    flex-wrap: wrap;
+    align-items: start;
     gap: 8px;
     font-size: 13px
 }
 
-.category-color input {
-    width: 36px;
-    height: 28px;
-    padding: 2px;
+.category-name-area {
+    flex: 0 1 240px;
+    min-width: 160px
+}
+
+.category-name-area {
+    display: grid;
+    gap: 4px
+}
+
+.category-name-area input[type="text"] {
+    box-sizing: border-box;
+    min-width: 0;
+    height: 34px
+}
+
+.category-name-units {
+    display: flex;
+    justify-self: stretch;
+    justify-content: space-between;
+    color: var(--color-gray-heavy);
+    font-size: 12px;
+    white-space: nowrap
+}
+
+.category-name-limit {
+    color: var(--color-red)
+}
+
+.category-name-count {
+    margin-left: auto
+}
+
+.category-manager-row input[type="color"] {
+    flex: 0 0 32px;
+    box-sizing: border-box;
+    width: 32px;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent
+}
+
+.category-manager-row input[type="color"] {
     cursor: pointer
+}
+
+.category-manager-row input[type="color"]::-webkit-color-swatch-wrapper,
+.category-create-dialog input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    overflow: hidden
+}
+
+.category-manager-row input[type="color"]::-webkit-color-swatch,
+.category-create-dialog input[type="color"]::-webkit-color-swatch {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 6px
+}
+
+.category-manager-add {
+    margin-top: 0
+}
+
+.category-draft-message {
+    min-height: 1.2em;
+    margin: 0;
+    color: var(--color-red);
+    font-size: 12px
+}
+
+.category-manager-actions {
+    display: flex;
+    flex: 0 0 auto;
+    margin-left: 12px;
+    gap: 8px
+}
+
+.category-action {
+    box-sizing: border-box;
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    padding: 0;
+    border-radius: 20px;
+    font-size: 16px
+}
+
+.category-action[hidden] {
+    display: none
+}
+
+.category-manager-instruction {
+    margin: 12px 4px 0;
+    color: var(--color-gray-heavy);
+    font-size: 12px
+}
+
+.category-create-dialog {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 34px;
+    gap: 12px;
+    align-items: center
+}
+
+.category-create-dialog input[type="text"] {
+    box-sizing: border-box;
+    height: 34px
+}
+
+.category-create-dialog input[type="color"] {
+    box-sizing: border-box;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer
+}
+
+.category-create-dialog .category-name-units {
+    grid-column: 1 / -1
+}
+
+.category-create-dialog .category-draft-message {
+    grid-column: 1 / -1
 }
 
 /* 日曆 */

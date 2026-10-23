@@ -38,6 +38,7 @@ vm.runInContext(`
  function validDate(value){return /^\\d{4}-\\d{2}-\\d{2}$/.test(value);}
  function makeId(){return "generated";}
  ${functionSource("blankState")}
+ ${functionSource("normalizeCategories")}
  ${functionSource("normalizeNumericInput")}
  ${functionSource("makeRow")}
  ${functionSource("durationWithinLimit")}
@@ -75,6 +76,7 @@ vm.createContext(moveContext);
 vm.runInContext(`
  let state={activeDate:"2026-10-07",dates:["2026-10-07"],days:{"2026-10-07":[]},staging:[]},draggedRow=null;
  function activeRows(){return state.days[state.activeDate];}
+ function discardCategoryDrafts(){}
  function cascadeFrom(){return null;}
  function clearConflictsAfterSuccess(){}
  function render(){}

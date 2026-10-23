@@ -1,7 +1,29 @@
+// 程式查找目錄：保留原有函式順序，依責任標記分散區段。
+// 搜尋「#region [標籤]」可只定位分區；同一標籤可能有多個區段。
+// 支援 region 的編輯器可收合各區；原有函式說明與測試定位標記保留。
+//
+// [資料保存] 設定、建立／載入、正規化、自動保存及資料查詢。
+// [共用工具] 文字轉義、數字正規化、時間換算、時長與名稱顯示。
+// [行程畫面] render、renderTabs、renderDay、renderStaging、rowMarkup、bindRows。
+// [拖曳操作] 觸控生命週期；桌面事件另在 renderTabs、bindRows 及全域事件區。
+// [時間連動] 正式時間鏈、鎖定重算、候選、副本試算及 handleTimeEdit。
+// [衝突處理] 上限／跨日／原子衝突、邊界、保存重檢、畫面判斷及警告。
+// [行程操作] 欄位更新、新增、排序、移至暫存、刪除及跨日期移動。
+// [待放置] 放置區段、結構性時長候選、候選燈箱銜接及 placePending。
+// [日期類別] 日期工具、月曆、日期選擇／建立／刪除及類別顏色。
+// [匯出備份] JSON、下載、LOGO、Canvas、圖片、PDF 與 ZIP。
+// [燈箱提示] showToast、時間選項燈箱、結構性調整燈箱、openDialog、askConfirm。
+// [啟動事件] 頁面按鈕、全域拖放、匯出入事件、離頁保存與首次繪製。
+//
+// 查找範例：改內容欄顯示找 [行程畫面]；追時間輸入找 handleTimeEdit；
+// 查拖曳時，同時查看觸控區、renderTabs、bindRows 與全域事件區。
+//
+// #region [資料保存] 設定與共用狀態
+// 責任：宣告保存鍵、預設資料與共用狀態，保留目前初始化順序。
 /* 行程資料以日期分頁，並保存到目前瀏覽器的 localStorage。 */
 const STORAGE_KEY = "tickbrick_trip_v1";
 const LEGACY_KEY = "hokkaido_itinerary_v47";
-const DEFAULT_CATEGORIES = [{name:"交通",color:"#e3f8eb"},{name:"逛街",color:"#ffe1e1"},{name:"景點",color:"#e4eafb"},{name:"用餐",color:"#fcffc2"},{name:"其他",color:"#e6e6e6"}];
+const DEFAULT_CATEGORIES = [{id:"default-transport",name:"交通",color:"#e3f8eb",protected:true},{id:"default-shopping",name:"逛街",color:"#ffe1e1",protected:true},{id:"default-sightseeing",name:"景點",color:"#e4eafb",protected:true},{id:"default-dining",name:"用餐",color:"#fcffc2",protected:true},{id:"default-other",name:"其他",color:"#e6e6e6",protected:true}];
 const INITIAL_ROWS = [
  ["06:30","07:30",60,"交通","➔ 桃園機場"],["07:30","09:30",120,"","辦理登機通關"],["09:30","13:05",215,"","Flight to SAPPORO (長榮 BR 116)"],
  ["13:05","14:30",85,"","抵達新千歲機場，辦理入境通關與提取行李"],["14:30","15:30",60,"交通","機場 ➔ 旅館（HELIO HOSTEL）"],
@@ -13,6 +35,9 @@ let activeCalendarMonth=state.activeDate?calendarMonthFor(state.activeDate):new 
 let draggedRow=null, autosaveTimer, calendarCreateMode=false, touchDrag=null, touchCandidate=null, touchClickUntil=0;
 let exportLogoPromise, exportLogoFallbackNotified=false;
 
+// #endregion
+// #region [資料保存] 行程資料建立與載入
+// 責任：預設資料、舊資料轉換與正規化。
 /* 建立含未解決衝突欄位的空白應用程式狀態。 */
 function blankState(){return{version:2,dates:[],activeDate:"",days:{},staging:[],categories:DEFAULT_CATEGORIES.map(x=>({...x})),conflicts:[]};}
 /* 產生供行程列識別與操作使用的短唯一 ID。 */
@@ -36,27 +61,54 @@ function normalizeState(input){
  result.activeDate=result.dates.includes(input.activeDate)?input.activeDate:(result.dates[0]||"");
  result.dates.forEach(date=>result.days[date]=Array.isArray(input.days&&input.days[date])?input.days[date].map(row=>({...row,id:row.id||makeId(),date,confirmed:!!row.confirmed,pending:!!row.pending})):[]);
  result.staging=Array.isArray(input.staging)?input.staging.map(row=>({...row,id:row.id||makeId(),date:"",start:"",end:"",confirmed:!!row.confirmed,pending:false})):[];
- result.categories=Array.isArray(input.categories)?input.categories.map(c=>({name:String(c.name),color:/^#[0-9a-f]{6}$/i.test(c.color)?c.color:"#FFFFFF"})):DEFAULT_CATEGORIES.map(c=>({...c}));
+ result.categories=normalizeCategories(input.categories);
  result.conflicts=Array.isArray(input.conflicts)?input.conflicts.filter(conflict=>conflict&&typeof conflict==="object"&&typeof conflict.lockedRowId==="string"&&typeof conflict.lockedField==="string").map(conflict=>({...conflict})):[];
- normalizeDirectConflictMarkers(result);hydrateConflictBoundaries(result);DEFAULT_CATEGORIES.forEach(def=>{if(!result.categories.some(c=>c.name===def.name))result.categories.push({...def});});return rebuildAutomaticConflicts(result);
+ normalizeDirectConflictMarkers(result);hydrateConflictBoundaries(result);return rebuildAutomaticConflicts(result);
 }
+/* 將匯入與舊版類別補上穩定身分與預設保護旗標，並保留自訂類別資料。 */
+function normalizeCategories(rawCategories){
+ const source=Array.isArray(rawCategories)?rawCategories:[],usedIds=new Set(),usedNames=new Set(),categories=[];
+ source.forEach((raw,index)=>{if(!raw||typeof raw!=="object")return;const name=String(raw.name??"").replace(/\s/g,"");if(!name||usedNames.has(name))return;const defaultCategory=DEFAULT_CATEGORIES.find(item=>item.id===raw.id)||(!raw.id&&DEFAULT_CATEGORIES.find(item=>item.name===name)),id=defaultCategory?.id||String(raw.id||"custom-import-"+index),color=/^#[0-9a-f]{6}$/i.test(raw.color)?raw.color:"#FFFFFF";
+  if(usedIds.has(id))return;usedIds.add(id);usedNames.add(name);categories.push({id,name,color,protected:!!defaultCategory||raw.protected===true});
+ });
+ DEFAULT_CATEGORIES.forEach(def=>{if(!categories.some(category=>category.id===def.id)){const nameTaken=categories.some(category=>category.name===def.name);categories.push({...def,name:nameTaken?def.name+"（預設）":def.name});}});
+ return categories;
+}
+// #endregion
+// #region [日期類別] 日期驗證與月份工具
+// 責任：日期格式與月曆月份基準；介面另見 openCalendar。
 /* 驗證值是否為可建立日期頁籤的 YYYY-MM-DD 日期。 */
 function validDate(value){return/^\d{4}-\d{2}-\d{2}$/.test(value)&&!isNaN(new Date(value+"T12:00:00").getTime());}
 /* 將日期轉成該月份第一天，作為月曆切換的穩定基準。 */
 function calendarMonthFor(value){const date=value?new Date(value+"T12:00:00"):new Date();return new Date(date.getFullYear(),date.getMonth(),1);}
+// #endregion
+// #region [資料保存] 自動保存
+// 責任：寫入 localStorage 與延遲保存；離頁保存另見檔案尾端。
 /* 將目前或指定應用程式狀態寫入瀏覽器儲存空間。 */
 function saveState(data){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data||state));}catch(error){console.error("自動保存失敗",error);showToast("瀏覽器儲存空間不足，請先匯出 JSON 備份");}}
 /* 延遲保存以合併短時間內連續的資料修改。 */
 function persist(){clearTimeout(autosaveTimer);autosaveTimer=setTimeout(()=>saveState(),120);}
+// #endregion
+// #region [共用工具] 文字轉義與日期顯示
+// 責任：提供安全文字轉義與日期標籤。
 /* 將文字轉義為可安全插入 HTML 字串的內容。 */
 function esc(value){return String(value==null?"":value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 /* 將日期轉成顯示用的月日與星期文字，可選擇包含年份。 */
 function dateLabel(value,year){if(!value)return"";const d=new Date(value+"T12:00:00"),w=["日","一","二","三","四","五","六"];return(year?d.getFullYear()+"/":"")+String(d.getMonth()+1).padStart(2,"0")+"/"+String(d.getDate()).padStart(2,"0")+"（"+w[d.getDay()]+"）";}
+// #endregion
+// #region [燈箱提示] 系統提示訊息
+// 責任：短暫提示；共用對話框另見 openDialog。
 /* 顯示會被後續訊息取代的短暫系統提示。 */
 function showToast(message){const toast=document.getElementById("toast");toast.textContent=message;toast.classList.add("show");clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>toast.classList.remove("show"),2100);}
+// #endregion
+// #region [資料保存] 作用中日期資料入口
+// 責任：取得目前日期的行程陣列；區域查詢另見 getList。
 /* 取得目前作用中日期的行程列。 */
 function activeRows(){return state.days[state.activeDate]||[];}
 
+// #endregion
+// #region [拖曳操作] 觸控長按、預覽與放置
+// 責任：觸控生命週期；桌面事件另見 renderTabs、bindRows 與全域事件區。
 /* 以 250ms 長按與 10px 移動門檻建立觸控拖曳候選，未啟動時不攔截頁面捲動。 */
 function beginTouchDrag(event,details){
  if(event.pointerType!=="touch"||event.button!==0||touchDrag||touchCandidate)return;
@@ -77,7 +129,7 @@ function beginTouchDrag(event,details){
  };
  const cancel=cancelEvent=>{if(cancelEvent.pointerId!==candidate.pointerId)return;clearTimeout(candidate.timer);if(candidate.activated){clearTouchDragVisuals();touchDrag=null;}removeCandidate();};
  const removeCandidate=()=>{if(touchCandidate===candidate)touchCandidate=null;window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",finish);window.removeEventListener("pointercancel",cancel);};
- candidate.timer=setTimeout(()=>{if(candidate.cancelled)return;candidate.activated=true;touchCandidate=null;touchDrag={...candidate,target:null};details.source.classList.add(details.type==="tab"?"tab-dragging":"row-dragging");createTouchPreview(details.source,event.clientX,event.clientY);try{(details.capture||details.source).setPointerCapture(event.pointerId);}catch(error){}updateTouchDrag(event.clientX,event.clientY);},250);
+ candidate.timer=setTimeout(()=>{if(candidate.cancelled)return;discardCategoryDrafts();candidate.activated=true;touchCandidate=null;touchDrag={...candidate,target:null};details.source.classList.add(details.type==="tab"?"tab-dragging":"row-dragging");createTouchPreview(details.source,event.clientX,event.clientY);try{(details.capture||details.source).setPointerCapture(event.pointerId);}catch(error){}updateTouchDrag(event.clientX,event.clientY);},250);
  window.addEventListener("pointermove",move,{passive:false});window.addEventListener("pointerup",finish,{passive:false});window.addEventListener("pointercancel",cancel,{passive:false});
 }
 /* 建立跟隨手指的完整行程列或頁籤視覺預覽，不參與命中判斷。 */
@@ -119,15 +171,19 @@ function finishTouchDrag(){
  }
 }
 
+// #endregion
+// #region [行程畫面] 畫面生成與列事件
+// 責任：頁籤、正式／暫存清單、欄位與事件重綁；操作由各入口處理。
 /* 繪製日期頁籤、當日清單、共用暫存區與類別色彩設定。 */
-function render(){renderTabs();renderDay();renderStaging();renderCategories();renderCalendar();}
+function render(categoryDrafts){renderTabs();renderDay();renderStaging();renderCategories(categoryDrafts);renderCalendar();}
 /* 繪製日期頁籤，保留滑鼠原生拖曳並掛上觸控長按拖曳入口。 */
 function renderTabs(){
  const root=document.getElementById("dateTabs");root.innerHTML="";
  state.dates.forEach((date,index)=>{const tab=document.createElement("div");tab.className="date-tab"+(date===state.activeDate?" active":"");tab.draggable=true;tab.dataset.date=date;
-  const select=document.createElement("button");select.type="button";select.className="date-tab-select";select.textContent=dateLabel(date);select.setAttribute("role","tab");select.setAttribute("aria-selected",date===state.activeDate?"true":"false");select.addEventListener("click",event=>{if(Date.now()<touchClickUntil){event.preventDefault();return;}state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();});
+  const select=document.createElement("button");select.type="button";select.className="date-tab-select";select.textContent=dateLabel(date);select.setAttribute("role","tab");select.setAttribute("aria-selected",date===state.activeDate?"true":"false");select.addEventListener("click",event=>{if(Date.now()<touchClickUntil){event.preventDefault();return;}discardCategoryDrafts();state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();});
   const close=document.createElement("button");close.type="button";close.className="date-tab-close";close.textContent="×";close.setAttribute("aria-label","刪除 "+dateLabel(date,true));close.draggable=false;close.addEventListener("click",e=>{e.stopPropagation();deleteDate(date);});tab.append(select,close);
-  tab.addEventListener("dragstart",e=>{if(e.target.closest(".date-tab-close")){e.preventDefault();return;}draggedRow={type:"tab",index,dropIndex:index};root.classList.add("is-dragging");tab.classList.add("tab-dragging");e.dataTransfer.effectAllowed="move";});
+  // [拖曳操作] 日期頁籤：桌面拖放、提示清理與下方觸控入口。
+  tab.addEventListener("dragstart",e=>{if(e.target.closest(".date-tab-close")){e.preventDefault();return;}discardCategoryDrafts();draggedRow={type:"tab",index,dropIndex:index};root.classList.add("is-dragging");tab.classList.add("tab-dragging");e.dataTransfer.effectAllowed="move";});
   tab.addEventListener("dragover",e=>{if(!draggedRow||draggedRow.type!=="tab")return;e.preventDefault();root.querySelectorAll(".tab-drop-before,.tab-drop-after").forEach(item=>item.classList.remove("tab-drop-before","tab-drop-after"));const before=e.clientX<tab.getBoundingClientRect().left+tab.offsetWidth/2;tab.classList.add(before?"tab-drop-before":"tab-drop-after");draggedRow.dropIndex=index+(before?0:1);});
   tab.addEventListener("drop",e=>{e.preventDefault();if(!draggedRow||draggedRow.type!=="tab")return;const from=draggedRow.index,to=draggedRow.dropIndex>from?draggedRow.dropIndex-1:draggedRow.dropIndex,item=state.dates.splice(from,1)[0];state.dates.splice(to,0,item);draggedRow=null;root.classList.remove("is-dragging");persist();renderTabs();});
   tab.addEventListener("dragend",()=>{draggedRow=null;root.classList.remove("is-dragging");root.querySelectorAll(".tab-dragging,.tab-drop-before,.tab-drop-after").forEach(item=>item.classList.remove("tab-dragging","tab-drop-before","tab-drop-after"));});root.appendChild(tab);
@@ -146,8 +202,8 @@ function renderStaging(){
  const root=document.getElementById("stagingBody");document.getElementById("stagingCount").textContent=state.staging.length+" 項";document.getElementById("emptyStaging").hidden=state.staging.length>0;
  root.innerHTML=state.staging.map((row,index)=>rowMarkup(row,index,"staging")).join("");bindRows(root,"staging");
 }
-/* 建立類別選單選項，並保留目前行程的選取值。 */
-function categoryOptions(value){return'<option value=""></option>'+state.categories.map(c=>'<option value="'+esc(c.name)+'" '+(value===c.name?"selected":"")+'>'+esc(c.name)+'</option>').join("");}
+/* 建立類別選單選項，固定保留可從行程列開啟的自訂類別入口。 */
+function categoryOptions(value){return'<option value=""></option>'+state.categories.map(c=>'<option value="'+esc(c.name)+'" '+(value===c.name?"selected":"")+'>'+esc(c.name)+'</option>').join("")+'<option value="__custom_category__">＋ 自訂類別…</option>';}
 /* 產生正式區或暫存區單列 HTML，並套用保存中的衝突與待確認提示狀態。 */
 function rowMarkup(row,index,area){
  const color=(state.categories.find(c=>c.name===row.category)||{}).color||"#FFFFFF",pending=!!row.pending;
@@ -171,28 +227,40 @@ function resizeContentTextarea(textarea){textarea.style.height="auto";textarea.s
 function bindRows(root,area){
  root.querySelectorAll(".schedule-row[data-id]").forEach(rowElement=>{const row=getRow(area,rowElement.dataset.id);
   rowElement.addEventListener("focusin",()=>{if(row.isNew){row.isNew=false;rowElement.classList.remove("new-row-highlight");persist();}});
-  rowElement.addEventListener("dragstart",e=>{if(!e.target.closest(".order-cell")){e.preventDefault();return;}draggedRow={type:"row",area,id:row.id};e.dataTransfer.effectAllowed="move";const rect=rowElement.getBoundingClientRect();e.dataTransfer.setDragImage(rowElement,e.clientX-rect.left,e.clientY-rect.top);rowElement.classList.add("row-dragging");});
+  // [拖曳操作] 行程列：桌面拖放與插入位置；觸控入口位於本函式尾端。
+  rowElement.addEventListener("dragstart",e=>{if(!e.target.closest(".order-cell")){e.preventDefault();return;}discardCategoryDrafts();draggedRow={type:"row",area,id:row.id};e.dataTransfer.effectAllowed="move";const rect=rowElement.getBoundingClientRect();e.dataTransfer.setDragImage(rowElement,e.clientX-rect.left,e.clientY-rect.top);rowElement.classList.add("row-dragging");});
   rowElement.addEventListener("dragend",()=>{rowElement.classList.remove("row-dragging");draggedRow=null;document.querySelectorAll(".touch-drop-before,.touch-drop-after").forEach(item=>item.classList.remove("touch-drop-before","touch-drop-after"));});
   rowElement.addEventListener("dragover",e=>{const acceptsRow=draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"));if(acceptsRow){e.preventDefault();const after=e.clientY>=rowElement.getBoundingClientRect().top+rowElement.getBoundingClientRect().height/2;document.querySelectorAll(".touch-drop-before,.touch-drop-after").forEach(item=>item.classList.remove("touch-drop-before","touch-drop-after"));rowElement.classList.add(after?"touch-drop-after":"touch-drop-before");}});
   rowElement.addEventListener("dragleave",()=>rowElement.classList.remove("touch-drop-before","touch-drop-after"));
   rowElement.addEventListener("drop",e=>{const acceptsRow=draggedRow&&draggedRow.type==="row"&&(draggedRow.area===area||(area==="day"&&draggedRow.area==="staging"));if(!acceptsRow)return;e.preventDefault();e.stopPropagation();const after=e.clientY>=rowElement.getBoundingClientRect().top+rowElement.getBoundingClientRect().height/2;rowElement.classList.remove("touch-drop-before","touch-drop-after");if(area==="day"&&draggedRow.area==="staging"){const stagingRow=getRow("staging",draggedRow.id);if(stagingRow)moveStagingRowToDay(stagingRow,row.id,after);return;}requestReorder(area,draggedRow.id,row.id,after);});
-  rowElement.querySelectorAll("[data-field]").forEach(input=>{const field=input.dataset.field,timeRetry=area==="day"&&!row.pending&&["start","end","duration"].includes(field),submit=()=>{if(timeRetry)handleTimeEdit(row.id,field,input.value,input);else updateRow(area,row.id,field,input.value,input);};input.addEventListener("change",()=>{if(input.dataset.submittedValue===input.value){delete input.dataset.submittedValue;return;}submit();});if(timeRetry)input.addEventListener("keydown",event=>{if(event.key!=="Enter"||event.isComposing)return;event.preventDefault();input.dataset.submittedValue=input.value;submit();});});
+  // [行程畫面] 欄位事件：正式時間送往 handleTimeEdit，其餘送往 updateRow。
+  rowElement.querySelectorAll("[data-field]").forEach(input=>{const field=input.dataset.field,timeRetry=area==="day"&&!row.pending&&["start","end","duration"].includes(field),submit=()=>{if(field==="category"&&input.value==="__custom_category__")return;if(timeRetry)handleTimeEdit(row.id,field,input.value,input);else updateRow(area,row.id,field,input.value,input);};input.addEventListener("change",()=>{if(input.dataset.submittedValue===input.value){delete input.dataset.submittedValue;return;}submit();});if(timeRetry)input.addEventListener("keydown",event=>{if(event.key!=="Enter"||event.isComposing)return;event.preventDefault();input.dataset.submittedValue=input.value;submit();});});
   rowElement.querySelectorAll(".content-input").forEach(textarea=>{resizeContentTextarea(textarea);textarea.addEventListener("input",()=>resizeContentTextarea(textarea));});
   rowElement.querySelectorAll("[data-confirmed-toggle]").forEach(input=>input.addEventListener("change",()=>updateRow(area,row.id,"confirmed",input.checked)));
-  rowElement.querySelectorAll("[data-lock]").forEach(button=>button.addEventListener("click",()=>{row.lock=row.lock===button.dataset.lock?"none":button.dataset.lock;clearConflictsAfterSuccess();renderDay();renderStaging();}));
-  rowElement.querySelector(".category-select").addEventListener("change",e=>e.currentTarget.style.backgroundColor=(state.categories.find(c=>c.name===e.currentTarget.value)||{}).color||"#fff");
+  rowElement.querySelectorAll("[data-lock]").forEach(button=>button.addEventListener("click",()=>{discardCategoryDrafts();row.lock=row.lock===button.dataset.lock?"none":button.dataset.lock;clearConflictsAfterSuccess();renderDay();renderStaging();}));
+  rowElement.querySelector(".category-select").addEventListener("change",e=>{if(e.currentTarget.value==="__custom_category__"){e.currentTarget.value=row.category;openCategoryCreateDialog({area,id:row.id});return;}e.currentTarget.style.backgroundColor=(state.categories.find(c=>c.name===e.currentTarget.value)||{}).color||"#fff";});
   rowElement.querySelectorAll("[data-action]").forEach(button=>button.addEventListener("click",()=>rowAction(area,row.id,button.dataset.action)));
+  // [拖曳操作] 行程列觸控入口；長按與命中由 beginTouchDrag 接手。
   rowElement.querySelector(".order-cell").addEventListener("pointerdown",event=>beginTouchDrag(event,{type:"row",area,id:row.id,source:rowElement,capture:event.currentTarget}));
  });
 }
+// #endregion
+// #region [資料保存] 區域與行程查詢
+// 責任：依正式／暫存區與 ID 取得目前資料。
 /* 依區域取得暫存區或目前日期的行程清單。 */
 function getList(area){return area==="staging"?state.staging:activeRows();}
 /* 依區域與 ID 取得單筆行程。 */
 function getRow(area,id){return getList(area).find(r=>r.id===id);}
+// #endregion
+// #region [共用工具] 數字正規化與時長範圍
+// 責任：全形數字與既有時長範圍；時間換算另見 formatTime。
 /* 將輸入的全形數字與全形冒號轉為半形，使混合輸入沿用既有時間與時長規則。 */
 function normalizeNumericInput(value){return String(value??"").replace(/[０-９]/g,char=>String.fromCharCode(char.charCodeAt(0)-0xFEE0)).replace(/：/g,":");}
 /* 單一行程只允許 0–1440 分鐘；舊資料仍保留原值，改由衝突流程提示。 */
 function durationWithinLimit(value){const total=Number(normalizeNumericInput(value));return Number.isFinite(total)&&total>=0&&total<=1440;}
+// #endregion
+// #region [衝突處理] 上限、跨日與原子衝突
+// 責任：資料檢核、衝突重建及畫面標記判斷。
 /* 建立舊資料超過單一行程時長上限時的可保存衝突，供畫面標示與匯出阻擋使用。 */
 function durationLimitConflict(row,date,area){return{id:"duration-limit-"+row.id,date:date||"",area:area||"day",lockedRowId:row.id,lockedField:"duration",lockedValue:row.duration,requiredValue:"1440",operation:"單一行程時長上限",durationLimit:true};}
 /* 同步所有日期與暫存行程的時長上限衝突；使用者修正回上限內時只移除這類衝突。 */
@@ -268,6 +336,9 @@ function atomicAdjacencyHasDirectSource(conflict){return state.conflicts.some(ma
 function hasConflictForRow(id){return state.conflicts.some(conflict=>{if(conflict.kind==="row-consistency")return conflict.rowId===id;if(conflict.kind==="adjacency")return !atomicAdjacencyHasDirectSource(conflict)&&(conflict.leftRowId===id||conflict.rightRowId===id);return conflict.directContext?directConflictRowIds(conflict).includes(id):conflict.lockedRowId===id;});}
 /* 判斷輸入欄是否為直接輸入後仍須保留的衝突欄位。 */
 function hasConflictForInput(id,field){return state.conflicts.some(conflict=>conflict.directRowId===id&&conflict.directField===field&&directConflictStillBlocks(conflict));}
+// #endregion
+// #region [衝突處理] 時間鏈邊界與來源移除
+// 責任：邊界範圍、來源移除基準與邊界重新定位。
 /* 判定兩筆相鄰正式行程是否尚未串接，作為手動保留衝突的時間鏈邊界。 */
 function isTimeBoundary(left,right){return !!(left&&right&&left.end&&right.start&&left.end!==right.start);}
 /* 從黃底直接修改來源與目前不連續位置補齊舊資料的左右時間鏈邊界。 */
@@ -333,10 +404,16 @@ function placePendingAtConflictBoundary(row,conflict){
 function relocateConflictBoundariesAfterRemoval(rowId,beforeRows){
  state.conflicts.forEach(conflict=>{const boundary=conflict.boundary;if(conflict.date!==state.activeDate||!boundary||conflict.directRowId===rowId)return;const removedIndex=beforeRows.findIndex(row=>row.id===rowId);if(removedIndex<0)return;if(boundary.leftRowId===rowId){const replacement=[...beforeRows.slice(0,removedIndex)].reverse().find(row=>!row.pending);if(replacement)boundary.leftRowId=replacement.id;else delete conflict.boundary;}if(boundary.rightRowId===rowId){const replacement=beforeRows.slice(removedIndex+1).find(row=>!row.pending);if(replacement)boundary.rightRowId=replacement.id;else delete conflict.boundary;}});
 }
+// #endregion
+// #region [時間連動] 相鄰正式行程查詢
+// 責任：查詢作用中日期的前後正式行程；陣列版本另見 findFormalBefore。
 /* 從目前日期向上找最近一筆非待放置正式行程索引。 */
 function formalIndexBefore(index){const rows=activeRows();for(let i=index-1;i>=0;i--)if(!rows[i].pending)return i;return-1;}
 /* 從目前日期向下找最近一筆非待放置正式行程索引。 */
 function formalIndexAfter(index){const rows=activeRows();for(let i=index+1;i<rows.length;i++)if(!rows[i].pending)return i;return-1;}
+// #endregion
+// #region [衝突處理] 衝突建立與安全寫入
+// 責任：建立鎖定／不足衝突，並檢查推算寫入是否改動鎖定值。
 /* 建立包含鎖定值、所需值與直接輸入來源的可保存衝突資料。 */
 function conflictFor(row,field,required,operation,direct){return{ id:makeId(),date:state.activeDate,lockedRowId:row.id,lockedField:field,lockedValue:row[field],requiredValue:required,operation:operation||"時間連動",directRowId:direct&&direct.rowId||"",directField:direct&&direct.field||""};}
 /* 建立相鄰行程吸收後會成為負時長的可保存衝突，不偽裝為鎖定欄位。 */
@@ -346,6 +423,9 @@ function setTimeValue(row,field,value,operation,direct){
  if(field==="duration"&&!durationWithinLimit(value))return insufficientDurationConflict(row,Number(value),operation,direct);
  if(row.lock===field&&row[field]!==value)return conflictFor(row,field,value,operation,direct);row[field]=value;return null;
 }
+// #endregion
+// #region [衝突處理] 已保存衝突的阻擋判定
+// 責任：重檢排序、直接輸入及其他保存衝突。
 /* 以原始排序意圖在副本上重跑，只有排序真正可成立時才解除已回復操作的衝突。 */
 function reorderConflictStillBlocks(conflict){
  const context=conflict.reorderContext;if(!context)return true;
@@ -389,6 +469,9 @@ function conflictStillBlocks(conflict){
  if(neighbourIndex<0)return row[conflict.lockedField]!==conflict.requiredValue;
  const neighbour=rows[neighbourIndex];return conflict.lockedField==="start"?neighbour.end!==row.start:neighbour.start!==row.end;
 }
+// #endregion
+// #region [時間連動] 正式時間鏈與鎖定重算
+// 責任：傳入陣列的相鄰查詢、鎖定錨點與結構性時間重算。
 /* 在指定行程陣列中向上找最近一筆非待放置正式行程。 */
 function findFormalBefore(rows,index){for(let i=index-1;i>=0;i--)if(!rows[i].pending)return i;return-1;}
 /* 在指定行程陣列中向下找最近一筆非待放置正式行程。 */
@@ -416,6 +499,9 @@ function recalculateLockedChain(operation,direct,preferredIndex=-1){
 }
 /* 結構性動作優先滿足整條時間鏈的時間鎖定，沒有時間鎖定時沿用既有鄰接串接。 */
 function recalculateStructuralChain(index,operation){const rows=activeRows();if(hasInvalidDurationInRows(rows)){const invalid=rows.find(row=>!row.pending&&!durationWithinLimit(row.duration));return durationLimitConflict(invalid,state.activeDate,"day");}const conflict=typeof lockedChainBases==="function"&&lockedChainBases(rows).length?recalculateLockedChain(operation):cascadeFrom(index,operation);return conflict||middleEndBeforeStartConflict(rows,state.activeDate);}
+// #endregion
+// #region [衝突處理] 衝突刷新、記錄與保存
+// 責任：以目前資料刷新衝突；成功入口為 clearConflictsAfterSuccess。
 /* 重新檢查所有已保存衝突；每次都從正式時間鏈重建原子衝突，不能由某個來源記錄誤刪其他斷點。 */
 function refreshConflicts(){
  normalizeDirectConflictMarkers(state);
@@ -431,10 +517,14 @@ function recordConflict(conflict,reorderContext){
 }
 /* 成功完成一項操作後刷新衝突並保存目前狀態。 */
 function clearConflictsAfterSuccess(){refreshConflicts();persist();}
+// #endregion
+// #region [行程操作] 一般欄位與待確認更新
+// 責任：直接值寫回與非正式時間連動入口；正式時間輸入另見 handleTimeEdit。
 /* 在衝突回復後重新寫回使用者直接輸入的欄位值。 */
 function setDirectValue(row,field,value){row[field]=value;}
 /* 更新非正式時間連動入口與待確認欄位，並在成功後重檢既有衝突。 */
 function updateRow(area,id,field,value,input){
+ discardCategoryDrafts();
  const row=getRow(area,id);if(!row)return;
  if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");render();return;}
  if(field==="confirmed"){row.confirmed=Boolean(value);}
@@ -444,6 +534,9 @@ function updateRow(area,id,field,value,input){
  clearConflictsAfterSuccess();
  persist();renderDay();renderStaging();
 }
+// #endregion
+// #region [行程操作] 排序與結構性調整入口
+// 責任：排序確認、時間錨點與時長調整；接收桌面及觸控請求。
 /* 找出排序後應保留時間的鎖定開始／結束錨點；拖曳列自身優先，其次才是前後相鄰正式列。 */
 function reorderTimeAnchorIndex(row,index){
  const rows=activeRows();if(["start","end"].includes(row.lock))return index;
@@ -478,6 +571,7 @@ function recalculateReorderedDayRow(row,index,operation,preservedStart){
 }
 /* 由桌面與觸控共用的排序入口；拖曳列鎖定開始／結束時間時，先取得使用者確認再重算。 */
 function requestReorder(area,fromId,toId,placeAfter){
+ discardCategoryDrafts();
  const row=getRow(area,fromId);if(!row)return;
  if(area==="day"&&crossesConflictBoundary(activeRows(),activeRows().findIndex(item=>item.id===fromId),activeRows().findIndex(item=>item.id===toId))){draggedRow=null;openDialog("時間無法連動修改","時間無法連動修改，請先解決目前衝突\n＊行程移動將復原",[{text:"我知道了",cls:"danger",run:()=>render()}]);return;}
  if(area==="day"&&["start","end"].includes(row.lock)){
@@ -504,6 +598,9 @@ function reorderRow(area,fromId,toId,placeAfter,adjustment,silent){
  if(silent)return null;
  draggedRow=null;clearConflictsAfterSuccess();render();if(area==="day")showToast("排序已更新");
 }
+// #endregion
+// #region [時間連動] 前後時間串接
+// 責任：依既有規則向前、向後或雙向串接，跳過待放置項目。
 /* 從指定正式行程向上串接，保留各列時長並以 24 小時循環推算開始時間。 */
 function cascadeBackward(index,operation,direct){
  const rows=activeRows();let currentIndex=index;
@@ -519,6 +616,9 @@ function cascadeForward(index,operation,direct){
 }
 /* 從指定位置跳過待放置列，向上與向下重新串接正式行程時間鏈。 */
 function cascadeFrom(index,operation,direct){const rows=activeRows(),current=rows[index],usable=!current||current.pending?formalIndexAfter(index):index,seed=usable>=0?usable:formalIndexBefore(index);return seed<0?null:cascadeBackward(seed,operation,direct)||cascadeForward(seed,operation,direct);}
+// #endregion
+// #region [共用工具] 時間換算、時長與行程名稱
+// 責任：時間格式、24 小時循環換算、時長及燈箱名稱顯示。
 /* 將輸入值正規化為 HH:MM 時間文字。 */
 function formatTime(value){let str=normalizeNumericInput(value).replace(/[^\d:]/g,"");if(!str)return"";let parts=str.includes(":")?str.split(":"):(str.length>2?[str.slice(0,-2),str.slice(-2)]:[str,"0"]);const h=Number(parts[0])||0,m=Number(parts[1])||0;if(h>23||m>59)return"";return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");}
 /* 將 HH:MM 時間轉換為當日累積分鐘數。 */
@@ -539,6 +639,9 @@ function durationValue(value,fallback=60){const total=Number(normalizeNumericInp
 function formatDuration(value){const total=durationValue(value,0),hours=Math.floor(total/60),minutes=total%60;return hours?(hours+"時"+(minutes?minutes+"分":"")):minutes+"分";}
 /* 燈箱內引用行程名稱時只使用內容第一行，保留主畫面的完整多行內容。 */
 function dialogRowName(row,fallback="此行程"){const first=String(row?.content??"").split(/\r?\n/,1)[0].trim();return first||fallback;}
+// #endregion
+// #region [時間連動] 時間候選與套用計算
+// 責任：建立及計算時間候選；副本試算入口另見 previewTimeOption。
 /* 依修改欄位、相鄰正式行程與本列鎖定欄位列出可用時間調整選項。 */
 function timeOptions(row,index,field){
  const previous=formalIndexBefore(index)>=0,next=formalIndexAfter(index)>=0,options=[],lockedField=row.lock==="none"?"":row.lock;
@@ -672,6 +775,9 @@ function applyTimeOption(row,index,field,value,option,direct){
  const middleCrossMidnight=middleEndBeforeStartConflict(activeRows(),state.activeDate);
  return conflict||middleCrossMidnight||null;
 }
+// #endregion
+// #region [時間連動] 套用、保留衝突與副本試算
+// 責任：連接候選計算、完整副本驗證與失敗保留；含共用 state 的暫時替換。
 /* 保留直接輸入值與其連動選擇，供日後檢查實際受影響時間鏈。 */
 function preserveDirectConflict(backup,rowId,field,value,conflict,directContext){state.days[state.activeDate]=backup;const row=activeRows().find(item=>item.id===rowId);if(row)setDirectValue(row,field,value);recordConflict({...conflict,directContext});render();openConflictModal(conflict,true);}
 /* 執行已選時間調整選項；若碰鎖定則保留直接輸入並保存衝突。 */
@@ -725,6 +831,9 @@ function previewCompanionTime(row,index,field,value,operation){
  try{const trialRow=activeRows().find(item=>item.id===row.id),companion=field==="start"?"end":"start";trialRow[field]=value;const next=field==="start"?timeAfter(trialRow.start,durationValue(trialRow.duration)):timeBefore(trialRow.end,durationValue(trialRow.duration)),direct={rowId:row.id,field},conflict=setTimeValue(trialRow,companion,next,operation,direct)||cascadeFrom(index,operation,direct),middle=middleEndBeforeStartConflict(activeRows(),state.activeDate);return{trial,conflict:conflict||middle||null};}
  finally{state=original;}
 }
+// #endregion
+// #region [燈箱提示] 時間選項、原因與預覽
+// 責任：無解提示、候選文案、預覽與句中滾輪；候選由時間連動區提供。
 /* 顯示沒有可行連動方式時的合併阻擋原因，套用按鈕保留版位但不可操作。 */
 function openNoTimeOptionDialog(row,index,field,value,operation,preview){
  const content=document.createElement("div");content.className="time-option-copy";appendNoTimeOptionMessage(content,[preview]);
@@ -828,8 +937,12 @@ const update=preservePosition=>{if(preservePosition!==0)renderWheel(first,0);if(
  const preserve=()=>keepTimeEditConflict(structuredClone(activeRows()),row.id,index,field,value,valid[selected].option,valid[selected]);
  openDialog(timeEditDialogTitle(row,field,value),content,[{text:valid.length===1?"我知道了":"套用變更",cls:"primary",beforeClose:()=>[0,1,2].forEach(position=>{const wheel=wheels[position];if(wheel?.parentNode)wheel._commit?.();}),run:()=>{state=valid[selected].trial;clearConflictsAfterSuccess();render();showToast("時間連動已更新");}},{text:"保留衝突",cls:"danger",run:preserve},{text:"復原",cls:"",run:()=>renderDay()}],{dialogClass:"time-option-dialog",actionsClass:"time-option-wheel-actions",onCancel:preserve,focusDialog:true});
 }
+// #endregion
+// #region [時間連動] 正式時間欄位輸入入口
+// 責任：輸入驗證、直接修正、首次補齊與一般候選分流。
 /* 處理正式行程時間欄位輸入；開始／結束直接修正先驗證完整副本，總時長、首次輸入與一般候選流程維持原規則。 */
 function handleTimeEdit(id,field,value,input){
+ discardCategoryDrafts();
  const row=getRow("day",id);if(!row)return;const lockedField=row.lock==="none"?"":row.lock;if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");renderDay();return;}
  const blankFirstInputConflict=typeof state==="undefined"?null:state.conflicts.find(conflict=>conflict.directContext?.blankFirstInput&&conflict.date===state.activeDate&&conflict.directRowId===id&&conflict.directField===field);
  if((field==="start"||field==="end")&&normalizeNumericInput(value)===""&&blankFirstInputConflict){row[field]="";state.conflicts=state.conflicts.filter(conflict=>conflict!==blankFirstInputConflict);input?.classList.remove("time-input-invalid");clearConflictsAfterSuccess();render();return;}
@@ -850,14 +963,19 @@ function handleTimeEdit(id,field,value,input){
 }
 
 /* 行程操作：新增、刪除、跨日期待放置與移入暫存。 */
+// #endregion
+// #region [行程操作] 新增、動作分派、暫存與刪除
+// 責任：行程操作與來源重算；跨日期另見 moveToDate，放置另見 placePending。
 /* 在第一筆正式行程前新增預設 60 分鐘行程；只推算新列，不改動既有資料或衝突。 */
 function addRow(){
+ discardCategoryDrafts();
  const rows=activeRows(),first=rows.find(r=>!r.pending);let start="",end="";
  if(first&&first.start){end=first.start;start=timeBefore(end,60);}
  const newRow=makeRow(state.activeDate,start,end,60,"","");newRow.isNew=true;rows.unshift(newRow);persist();render();showToast("已新增行程");
 }
 /* 依行程列動作分派刪除、暫存、放置或跨日期移動。 */
 function rowAction(area,id,action){
+ discardCategoryDrafts();
  const row=getRow(area,id);if(!row)return;
  if(action==="delete")return confirmDeleteRow(area,row);
  if(action==="stage")moveRowToStaging(row);
@@ -866,6 +984,7 @@ function rowAction(area,id,action){
 }
 /* 將正式行程移至暫存並重新串接來源日期，鎖定衝突時可試算來源列的增長時長。 */
 function moveRowToStaging(row,adjustment,silent,originSide){
+ if(!silent)discardCategoryDrafts();
  row=activeRows().find(item=>item.id===(row&&row.id))||row;const list=activeRows(),index=list.indexOf(row);if(index<0)return;const origin=originConflictFor(row.id);if(origin&&!silent&&!originSide)return chooseOriginRemovalAnchor(origin,row,side=>moveRowToStaging(row,adjustment,false,side));
  const stateBackup=structuredClone(state),beforeRows=structuredClone(list),scopeBefore=conflictChainScope(list,index),preservedStart=list.slice(scopeBefore.first,scopeBefore.last+1).find(item=>!item.pending)?.start||"";list.splice(index,1);relocateConflictBoundariesAfterRemoval(row.id,beforeRows);if(adjustment){const candidate=list.find(item=>item.id===adjustment.id);if(candidate)candidate.duration=adjustment.duration;}row.start="";row.end="";row.date="";row.pending=false;row.lock="none";row.isNew=false;state.staging.push(row);
  if(origin&&originSide){const newConflict=resolveOriginRemoval(origin,row.id,originSide,beforeRows,"移至暫存");if(silent)return newConflict||null;draggedRow=null;clearConflictsAfterSuccess();render();showToast("行程已移至共用暫存區");if(newConflict)openCompletedRemovalConflict();return;}
@@ -875,6 +994,7 @@ function moveRowToStaging(row,adjustment,silent,originSide){
 }
 /* 將暫存行程插入目前日期指定列的前後，並維持待放置狀態。 */
 function moveStagingRowToDay(row,targetId,placeAfter=false){
+ discardCategoryDrafts();
  if(!state.activeDate)return;
  const stagingIndex=state.staging.indexOf(row);if(stagingIndex<0)return;state.staging.splice(stagingIndex,1);
  row.date=state.activeDate;row.pending=true;row.lock="none";row.isNew=false;
@@ -899,6 +1019,9 @@ function deleteRowWithAdjustment(area,rowId,adjustment,silent,originSide){
  if(silent)return null;
  clearConflictsAfterSuccess();render();showToast("行程已刪除，時間自動串聯完成");
 }
+// #endregion
+// #region [衝突處理] 衝突原因與警告燈箱
+// 責任：整理實際衝突原因並顯示警告，共用機制由 openDialog 提供。
 /* 說明保留直接值後的真實時間不一致，不把未鎖定資料誤稱為鎖定欄位。 */
 function directConflictDescription(conflict){
  const rows=state.days[conflict.date]||[],ids=conflict.directContext?.chainRowIds||[],items=(conflict.directContext?.blankFirstInput?[rows.find(row=>row.id===conflict.directRowId)]:ids.map(id=>rows.find(row=>row.id===id))).filter(Boolean),messages=[];
@@ -911,8 +1034,12 @@ function openConflictModal(conflict,direct){const locked=getRow("day",conflict.l
 function presentOperationConflict(conflict){openConflictModal(conflict);}
 /* 移除衝突來源並完成可連動時間重算後，以單鍵燈箱提示另一側鎖定形成的新衝突。 */
 function openCompletedRemovalConflict(){openDialog("時間衝突","已完成移除；部分行程時間仍有衝突，請確認紅色標示。",[{text:"我知道了",cls:"danger"}]);}
+// #endregion
+// #region [行程操作] 跨日期移動
+// 責任：來源移除、目標日期建立與置頂待放置；日期選擇介面見 chooseDate。
 /* 移出目前日期前先重新串接來源日期；遇鎖定衝突則可試算來源列的時長增加。 */
 function moveToDate(area,row,targetDate,adjustment,silent,originSide){
+ if(!silent)discardCategoryDrafts();
  if(!validDate(targetDate))return;
  row=(area==="staging"?state.staging:activeRows()).find(item=>item.id===(row&&row.id))||row;if(!row)return;const stateBackup=structuredClone(state);
  if(area==="day"&&targetDate===state.activeDate)return;
@@ -924,6 +1051,9 @@ function moveToDate(area,row,targetDate,adjustment,silent,originSide){
  if(silent)return null;
  row.date=targetDate;row.start="";row.end="";row.pending=true;row.lock="none";row.isNew=false;state.days[targetDate].unshift(row);state.activeDate=targetDate;activeCalendarMonth=calendarMonthFor(targetDate);clearConflictsAfterSuccess();render();showToast("行程已移至 "+dateLabel(targetDate)+"，確認位置後按「放置此處」");
 }
+// #endregion
+// #region [待放置] 放置區段與結構性時長試算
+// 責任：包含放置及刪除／移出／排序輔助函式；各操作沿用自己的邊界規則。
 /* 取得放置位置前後最近時間鎖定的正式區段；待放置列不會形成邊界。 */
 function placementTimeBoundaryScope(rows,index){return deleteTimeBoundaryScope(rows,index);}
 /* 依相關時間鎖定重建放置區段；有右側鎖定時向上反推，有左側鎖定時向下串接，均不越界。 */
@@ -1014,6 +1144,9 @@ function structuralDurationCandidates(beforeState,candidateIds,mode,attempt,requ
   const target=durationAdjustmentTarget(row,mode,duration=>{state=structuredClone(beforeState);const conflict=attempt({id:row.id,duration},true);state=originalState;return !!conflict;},requiredIncrease);return{row,target};
  }).filter(item=>item.target!==null);state=originalState;return candidates;
 }
+// #endregion
+// #region [燈箱提示] 結構性時長調整燈箱
+// 責任：呈現候選、滾輪與預覽，確認後透過傳入回呼套用原操作。
 /* 顯示共用單列時長調整燈箱，確認後才套用原本結構操作與候選時長。 */
 function openDurationAdjustmentDialog(config){
  const {operation,candidates,locked,apply,cancelText="取消",onCancel,onNoCandidates}=config,displayName=value=>value.length>20?value.slice(0,20)+"...":value,cause=locked.length?"由於"+locked.map(item=>"「"+displayName(dialogRowName(item))+"」的「"+fieldLabel(item.lock)+"」").join("及")+"已鎖定，造成時間衝突。":"造成時間衝突。";
@@ -1028,6 +1161,9 @@ function openDurationAdjustmentDialog(config){
  const title=document.createElement("span"),titleIcon=document.createElement("i");title.className="dialog-warning-title";titleIcon.className="fa-solid fa-triangle-exclamation dialog-warning-title-icon";titleIcon.setAttribute("aria-hidden","true");title.append(titleIcon,document.createTextNode("時間衝突"));
  openDialog(title,content,[{text:"套用調整",cls:"primary",beforeClose:()=>{modeWheel?._commit?.();if(mode==="調整"&&targetWheel?.parentNode)targetWheel._commit?.();},run:()=>apply(activeCandidate)},{text:cancelText,cls:"",actionClass:"dialog-cancel",run:onCancel||(()=>render())}],{dialogClass:"pending-duration-dialog",actionsClass:"pending-duration-actions"});
 }
+// #endregion
+// #region [待放置] 候選選擇與確認放置
+// 責任：連接放置試算、候選燈箱與套用；拖回日期先成為待放置。
 /* 顯示放置區段可縮短時長或保留時長重排的候選；僅確認後才寫入資料。 */
 function openPendingDurationDialog(row,before,conflict){
  const index=before.findIndex(item=>item.id===row.id),scope=placementTimeBoundaryScope(before,index),segment=before.slice(scope.first,scope.last+1),locked=segment.filter(item=>!item.pending&&["start","end"].includes(item.lock)),shortened=segment.filter(item=>item.id===row.id||(!item.pending&&item.lock!=="duration")).filter(item=>item.lock!=="duration").map(item=>({row:item,target:pendingDurationTarget(before,row.id,item.id)})).filter(item=>item.target!==null).map(item=>({...item,label:dialogRowName(item.row)+" 的時長"})),originalRows=state.days[state.activeDate],trial=structuredClone(before);state.days[state.activeDate]=trial;const unchangedResult=tryPlacePending(row.id,"",null);state.days[state.activeDate]=originalRows;const unchanged=!unchangedResult.conflict?{row:before[index],target:durationValue(row.duration),label:"既有時長不變，更新相關行程時間",previewText:"將保留各行程既有時長，更新放置區段內相關行程時間。",unchanged:true}:null,candidates=[...shortened,...(unchanged?[unchanged]:[])];
@@ -1037,13 +1173,17 @@ function openPendingDurationDialog(row,before,conflict){
 function placementReflowChangesExistingRows(before,rowId){return before.some(item=>!item.pending&&item.id!==rowId&&(()=>{const current=activeRows().find(row=>row.id===item.id);return current&&(current.start!==item.start||current.end!==item.end);})());}
 /* 將待放置行程接到相鄰正式時間鏈；時間鎖定區段先讓使用者選擇縮短或保留時長重排。 */
 function placePending(row){
+ discardCategoryDrafts();
  const rows=activeRows(),index=rows.indexOf(row);if(index<0)return;const before=structuredClone(rows),result=tryPlacePending(row.id,"",null),scope=placementTimeBoundaryScope(before,index),hasTimeLock=before.slice(scope.first,scope.last+1).some(item=>!item.pending&&["start","end"].includes(item.lock));
  if(result.conflict||(hasTimeLock&&placementReflowChangesExistingRows(before,row.id))){state.days[state.activeDate]=before;openPendingDurationDialog(row,before,result.conflict);return;}
  clearConflictsAfterSuccess();render();showToast("行程已放置並加入時間連動");
 }
 
+// #endregion
+// #region [日期類別] 日期選擇、建立與刪除
+// 責任：月曆與日期選擇燈箱；頁籤繪製及拖曳另見 renderTabs。
 /* 日期頁籤與日曆：已有日期可跳轉，空白日期可建立新頁籤。 */
-function openCalendar(createMode){const pop=document.getElementById("calendarPopover");if(createMode){calendarCreateMode=true;pop.hidden=false;}else{calendarCreateMode=false;pop.hidden=!pop.hidden;}if(!pop.hidden)renderCalendar();}
+function openCalendar(createMode){discardCategoryDrafts();const pop=document.getElementById("calendarPopover");if(createMode){calendarCreateMode=true;pop.hidden=false;}else{calendarCreateMode=false;pop.hidden=!pop.hidden;}if(!pop.hidden)renderCalendar();}
 /* 繪製目前月份的日期按鈕、日期頁籤狀態與選取日期。 */
 function renderCalendar(){
  const title=document.getElementById("calendarMonth"),grid=document.getElementById("calendarGrid");if(!title||!grid)return;
@@ -1053,9 +1193,10 @@ function renderCalendar(){
  for(let day=1;day<=total;day++){const date=year+"-"+String(month+1).padStart(2,"0")+"-"+String(day).padStart(2,"0"),btn=document.createElement("button");btn.type="button";btn.className="calendar-day "+(state.dates.includes(date)?"has-date":"no-date")+(date===state.activeDate?" selected":"");btn.textContent=day;btn.title=state.dates.includes(date)?"已有日期頁籤":"尚未建立日期";btn.disabled=!calendarCreateMode&&!state.dates.includes(date);btn.addEventListener("click",()=>{if(state.dates.includes(date)){state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();document.getElementById("calendarPopover").hidden=true;}else if(calendarCreateMode)openDateAction(date);});grid.appendChild(btn);}
 }
 /* 開啟建立指定日期頁籤的確認燈箱。 */
-function openDateAction(date){openDialog("建立日期頁籤？",dateLabel(date,true)+" 尚未建立行程頁籤。",[{text:"建立並前往",cls:"primary",run:()=>{state.dates.push(date);state.days[date]=[];state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();document.getElementById("calendarPopover").hidden=true;}},{text:"取消",cls:""}]);}
+function openDateAction(date){discardCategoryDrafts();openDialog("建立日期頁籤？",dateLabel(date,true)+" 尚未建立行程頁籤。",[{text:"建立並前往",cls:"primary",run:()=>{state.dates.push(date);state.days[date]=[];state.activeDate=date;activeCalendarMonth=calendarMonthFor(date);persist();render();document.getElementById("calendarPopover").hidden=true;}},{text:"取消",cls:""}]);}
 /* 開啟可切換月份的日期選擇燈箱，並將選取日期交給回呼處理。 */
 function chooseDate(callback,{excludeCurrent=false}={}){
+ discardCategoryDrafts();
  let month=calendarMonthFor(state.activeDate),selected=excludeCurrent?"":state.activeDate||"";
  const content=document.createElement("div");content.className="date-choice";const hint=document.createElement("p");hint.textContent=excludeCurrent?"請選擇其他日期；目前日期無法移動。":"選擇已有日期，或選擇尚未建立的日期；新日期會自動建立頁籤。";
  const heading=document.createElement("div");heading.className="calendar-heading";const prev=document.createElement("button");prev.type="button";prev.textContent="‹";const title=document.createElement("strong");const next=document.createElement("button");next.type="button";next.textContent="›";heading.append(prev,title,next);
@@ -1068,16 +1209,58 @@ function chooseDate(callback,{excludeCurrent=false}={}){
  openDialog("移至日期",content,[{text:"移至所選日期",cls:"primary",disabled:!selected,run:()=>callback(selected)},{text:"取消",cls:""}]);moveButton=document.getElementById("dialogActions").firstElementChild;moveButton.disabled=!selected;
 }
 /* 確認後刪除日期頁籤及其全部行程，並切換至可用日期。 */
-function deleteDate(date=state.activeDate){if(!date)return;askConfirm("刪除日期頁籤","刪除 "+dateLabel(date,true)+" 與這一天的所有行程嗎？此操作無法復原。","刪除此日期",()=>{const idx=state.dates.indexOf(date);state.dates.splice(idx,1);delete state.days[date];if(state.activeDate===date)state.activeDate=state.dates[Math.min(idx,state.dates.length-1)]||"";if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();});}
+function deleteDate(date=state.activeDate){discardCategoryDrafts();if(!date)return;askConfirm("刪除日期頁籤","刪除 "+dateLabel(date,true)+" 與這一天的所有行程嗎？此操作無法復原。","刪除此日期",()=>{const idx=state.dates.indexOf(date);state.dates.splice(idx,1);delete state.days[date];if(state.activeDate===date)state.activeDate=state.dates[Math.min(idx,state.dates.length-1)]||"";if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();});}
 
-/* 現有類別顏色可以自訂，並納入自動保存及備份。 */
-function renderCategories(){const root=document.getElementById("categoryColors");root.innerHTML="";state.categories.forEach(category=>{const label=document.createElement("label");label.className="category-color";const name=document.createElement("span");name.textContent=category.name;const input=document.createElement("input");input.type="color";input.value=category.color;input.setAttribute("aria-label",category.name+" 顏色");input.addEventListener("input",()=>{category.color=input.value;persist();renderDay();renderStaging();});label.append(name,input);root.appendChild(label);});}
+// #endregion
+// #region [日期類別] 類別管理
+// 責任：類別新增、名稱／顏色草稿保存與還原、刪除、使用處同步與管理器重繪。
+/* 類別可新增、改名、改色及刪除，並納入自動保存與備份。 */
+/* 計算分類名稱的顯示單位：ASCII 半形字元為 1，其餘字元為 2。 */
+function categoryNameUnits(value){return[...String(value??"")].reduce((total,char)=>total+(char.codePointAt(0)<=0x7f?1:2),0);}
+/* 移除使用者輸入的所有空白，讓草稿、驗證與保存使用相同名稱。 */
+function stripCategoryWhitespace(value){return String(value??"").replace(/\s/g,"");}
+/* 將名稱依 16 單位上限截成完整字元，供鍵盤、貼上與 IME 組字完成後共用，避免已提交內容超限。 */
+function limitCategoryName(value,limit=16){let limited="";for(const char of stripCategoryWhitespace(value)){if(categoryNameUnits(limited+char)>limit)break;limited+=char;}return limited;}
+/* 在選取範圍插入可容納的名稱文字；貼上超限時保留從貼上內容開頭起放得下的完整字元。 */
+function insertCategoryName(input,text){const start=input.selectionStart??input.value.length,end=input.selectionEnd??start,prefix=stripCategoryWhitespace(input.value.slice(0,start)),suffix=stripCategoryWhitespace(input.value.slice(end)),available=Math.max(0,16-categoryNameUnits(prefix)-categoryNameUnits(suffix)),inserted=limitCategoryName(text,available),value=limitCategoryName(prefix+inserted+suffix);input.value=value;const cursor=Math.min(prefix.length+inserted.length,value.length);input.setSelectionRange(cursor,cursor);return value;}
+/* 驗證分類草稿的空白、重名與 16 單位上限，編輯時可排除原本的分類。 */
+function categoryDraftError(name,excludeId){const cleaned=stripCategoryWhitespace(name);if(!cleaned)return"請輸入類別名稱";if(categoryNameUnits(cleaned)>16)return"類別名稱最多 16 個單位";if(state.categories.some(category=>category.id!==excludeId&&category.name===cleaned))return"類別名稱不可重複";return"";}
+/* 產生未被既有類別使用的柔和淺色，建立入口與管理區新增列共用。 */
+function randomUnusedCategoryColor(){let color;do{const hue=Math.floor(Math.random()*360),saturation=55+Math.floor(Math.random()*20),lightness=84+Math.floor(Math.random()*8);color=rgbToHex(...hslToRgb(hue/360,saturation/100,lightness/100));}while(state.categories.some(category=>category.color.toLowerCase()===color.toLowerCase()));return color;}
+/* 將 HSL 顏色轉為 RGB，供隨機柔和色生成使用。 */
+function hslToRgb(h,s,l){if(s===0){const value=Math.round(l*255);return[value,value,value];}const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q,toChannel=t=>{t=(t+1)%1;return Math.round(255*(t<1/6?p+(q-p)*6*t:t<1/2?q:t<2/3?p+(q-p)*(2/3-t)*6:p));};return[toChannel(h+1/3),toChannel(h),toChannel(h-1/3)];}
+/* 將 RGB 數值轉為 #RRGGBB，維持色彩輸入與 JSON 的既有格式。 */
+function rgbToHex(r,g,b){return"#"+[r,g,b].map(value=>value.toString(16).padStart(2,"0")).join("");}
+/* 以分類名稱同步所有正式、暫存與待放置行程的類別欄位。 */
+function replaceCategoryUsage(previousName,nextName){Object.values(state.days).forEach(rows=>rows.forEach(row=>{if(row.category===previousName)row.category=nextName;}));state.staging.forEach(row=>{if(row.category===previousName)row.category=nextName;});}
+/* 保存一列分類名稱與顏色草稿；名稱變動時一併同步所有既有使用處，並保留其他列的未保存草稿。 */
+function saveCategory(category,name,color){const cleaned=stripCategoryWhitespace(name),error=categoryDraftError(cleaned,category.id);if(error){showToast(error);return false;}const drafts=captureCategoryDrafts(category.id),previousName=category.name;category.name=cleaned;category.color=color;if(previousName!==cleaned)replaceCategoryUsage(previousName,cleaned);saveState();render(drafts);return true;}
+/* 還原目前展開的分類管理草稿，不寫入資料，供收合與其他作業入口使用。 */
+function discardCategoryDrafts(){const details=document.getElementById("categorySettings");if(!details?.open)return;renderCategories();}
+/* 擷取其他管理列的未保存名稱與顏色，讓單列保存重繪後不會丟失其草稿與還原基準。 */
+function captureCategoryDrafts(excludeId){const root=document.getElementById("categoryColors"),drafts={};root?.querySelectorAll(".category-manager-row").forEach(row=>{const id=row.dataset.categoryId,name=row.querySelector("[data-category-name]"),color=row.querySelector("[data-category-color]");if(!id||id===excludeId||!name||!color)return;if(id==="__new__"||name.value!==row.dataset.savedName||color.value.toLowerCase()!==row.dataset.savedColor)drafts[id]={name:name.value,color:color.value};});return drafts;}
+/* 建立一列可獨立保存／還原的分類編輯控制項；名稱區內依序顯示輸入、單位與驗證訊息。 */
+function categoryManagerRow(category,isNew=false,draft){const row=document.createElement("div");row.className="category-manager-row"+(isNew?" category-manager-add":"");row.dataset.categoryId=isNew?"__new__":category.id;row.dataset.savedName=category.name;row.dataset.savedColor=category.color.toLowerCase();const nameArea=document.createElement("div"),name=document.createElement("input"),units=document.createElement("span"),unitNotice=document.createElement("span"),unitCount=document.createElement("span"),color=document.createElement("input"),message=document.createElement("span"),actions=document.createElement("div"),save=document.createElement("button"),restore=document.createElement("button"),remove=document.createElement("button");nameArea.className="category-name-area";actions.className="category-manager-actions";name.type="text";name.placeholder="請輸入類別名稱";name.dataset.categoryName="";name.value=limitCategoryName(draft?.name??category.name);units.className="category-name-units";units.dataset.categoryUnits="";units.setAttribute("aria-live","polite");unitNotice.className="category-name-limit";unitCount.className="category-name-count";units.append(unitNotice,unitCount);color.type="color";color.dataset.categoryColor="";color.value=draft?.color??category.color;message.className="category-draft-message";message.setAttribute("aria-live","polite");save.type=restore.type=remove.type="button";save.className="button category-action category-save primary";restore.className="button category-action category-restore";remove.className="button category-action category-delete danger";save.setAttribute("aria-label",isNew?"新增類別":"保存類別");save.title=isNew?"新增類別":"保存類別";restore.setAttribute("aria-label","還原草稿");restore.title="還原草稿";remove.setAttribute("aria-label","刪除類別");remove.title="刪除類別";save.innerHTML=isNew?'<i class="fa-solid fa-plus" aria-hidden="true"></i>':'<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>';restore.innerHTML='<i class="fa-solid fa-rotate-left" aria-hidden="true"></i>';remove.innerHTML='<i class="fa-solid fa-trash" aria-hidden="true"></i>';
+ const refresh=()=>{const cursor=name.selectionStart??name.value.length,cleaned=limitCategoryName(name.value);if(name.value!==cleaned){const before=limitCategoryName(name.value.slice(0,cursor));name.value=cleaned;name.setSelectionRange(Math.min(before.length,cleaned.length),Math.min(before.length,cleaned.length));}const error=categoryDraftError(cleaned,isNew?undefined:category.id),changed=cleaned!==category.name||color.value.toLowerCase()!==category.color.toLowerCase(),count=categoryNameUnits(cleaned);unitNotice.textContent=count===16?"類別名稱最多 16 個單位":"";unitNotice.hidden=count!==16;unitCount.textContent=count+"／16";message.textContent=cleaned?error:"";save.disabled=!!error||!changed;restore.hidden=!changed;};
+ name.addEventListener("beforeinput",event=>{if(event.isComposing||!event.inputType.startsWith("insert"))return;const text=event.data??event.dataTransfer?.getData("text/plain");if(text==null)return;event.preventDefault();insertCategoryName(name,text);refresh();});name.addEventListener("paste",event=>{const text=event.clipboardData?.getData("text/plain");if(text==null)return;event.preventDefault();insertCategoryName(name,text);refresh();});name.addEventListener("input",event=>{if(!event.isComposing)refresh();});name.addEventListener("compositionend",refresh);color.addEventListener("input",refresh);restore.addEventListener("click",()=>{name.value=category.name;color.value=category.color;refresh();});save.addEventListener("click",()=>{if(isNew){const drafts=captureCategoryDrafts("__new__"),created={id:"custom-"+makeId(),name:stripCategoryWhitespace(name.value),color:color.value,protected:false};if(categoryDraftError(created.name)){refresh();return;}state.categories.push(created);saveState();render(drafts);return;}saveCategory(category,name.value,color.value);});
+ if(!isNew){remove.disabled=category.protected;remove.hidden=category.protected;remove.addEventListener("click",()=>openCategoryDeleteDialog(category));}else remove.hidden=true;
+ nameArea.append(name,units,message);actions.append(save,restore,remove);row.append(nameArea,color,actions);refresh();return row;
+}
+/* 繪製行內類別管理器；保存其中一列時可帶回其他列草稿，收合或外部作業仍會放棄所有草稿。 */
+function renderCategories(drafts={}){const root=document.getElementById("categoryColors");if(!root)return;const newCategory={name:"",color:drafts.__new__?.color||randomUnusedCategoryColor()};root.replaceChildren(...state.categories.map(category=>categoryManagerRow(category,false,drafts[category.id])),categoryManagerRow(newCategory,true,drafts.__new__));}
+/* 開啟從行程類別選單建立自訂類別的名稱與顏色對話框，保存後套用觸發列。 */
+function openCategoryCreateDialog(trigger){discardCategoryDrafts();const content=document.createElement("div"),name=document.createElement("input"),color=document.createElement("input"),units=document.createElement("span"),unitNotice=document.createElement("span"),unitCount=document.createElement("span"),message=document.createElement("p");content.className="category-create-dialog";name.type="text";name.placeholder="請輸入類別名稱";color.type="color";color.value=randomUnusedCategoryColor();units.className="category-name-units";units.setAttribute("aria-live","polite");unitNotice.className="category-name-limit";unitCount.className="category-name-count";units.append(unitNotice,unitCount);message.className="category-draft-message";content.append(name,color,units,message);openDialog("新增自訂類別",content,[{text:"保存",cls:"primary",disabled:true,run:()=>{const created={id:"custom-"+makeId(),name:stripCategoryWhitespace(name.value),color:color.value,protected:false};if(categoryDraftError(created.name))return;state.categories.push(created);const row=getRow(trigger.area,trigger.id);if(row)row.category=created.name;saveState();render();}},{text:"取消",cls:""}]);const save=document.querySelector("#dialogActions .primary"),refresh=()=>{const cursor=name.selectionStart??name.value.length,cleaned=limitCategoryName(name.value);if(name.value!==cleaned){const before=limitCategoryName(name.value.slice(0,cursor));name.value=cleaned;name.setSelectionRange(Math.min(before.length,cleaned.length),Math.min(before.length,cleaned.length));}const error=categoryDraftError(cleaned),count=categoryNameUnits(cleaned);unitNotice.textContent=count===16?"類別名稱最多 16 個單位":"";unitNotice.hidden=count!==16;unitCount.textContent=count+"／16";message.textContent=cleaned?error:"";save.disabled=!!error;};name.addEventListener("beforeinput",event=>{if(event.isComposing||!event.inputType.startsWith("insert"))return;const text=event.data??event.dataTransfer?.getData("text/plain");if(text==null)return;event.preventDefault();insertCategoryName(name,text);refresh();});name.addEventListener("paste",event=>{const text=event.clipboardData?.getData("text/plain");if(text==null)return;event.preventDefault();insertCategoryName(name,text);refresh();});name.addEventListener("input",event=>{if(!event.isComposing)refresh();});name.addEventListener("compositionend",refresh);refresh();name.focus();}
+/* 詢問自訂類別刪除後要清空全部使用處或替換成另一個既有類別。 */
+function openCategoryDeleteDialog(category){const alternatives=state.categories.filter(item=>item.id!==category.id),content=document.createElement("div"),copy=document.createElement("p"),mode=document.createElement("select"),replacement=document.createElement("select");copy.textContent="刪除「"+category.name+"」後，請選擇既有行程要如何處理。";mode.innerHTML='<option value="clear">清除所有使用處的類別</option><option value="replace">替換成其他類別</option>';replacement.innerHTML=alternatives.map(item=>'<option value="'+esc(item.id)+'">'+esc(item.name)+'</option>').join("");replacement.hidden=true;mode.addEventListener("change",()=>replacement.hidden=mode.value!=="replace");content.append(copy,mode,replacement);openDialog("刪除自訂類別",content,[{text:"刪除類別",cls:"danger",run:()=>{const drafts=captureCategoryDrafts(category.id),next=alternatives.find(item=>item.id===replacement.value),replacementName=mode.value==="replace"&&next?next.name:"";replaceCategoryUsage(category.name,replacementName);state.categories=state.categories.filter(item=>item.id!==category.id);saveState();render(drafts);}},{text:"取消",cls:""}]);}
 
 /* JSON 匯入匯出保存完整日期、排序、暫存與類別顏色。 */
+// #endregion
+// #region [匯出備份] 衝突阻擋與 JSON 備份
+// 責任：匯出前重檢、JSON 匯出／匯入及下載；事件綁定另見檔案尾端。
 /* 重檢後回傳是否仍有必須阻擋匯出的未解決時間衝突。 */
 function hasUnresolvedConflicts(){refreshConflicts();return state.conflicts.length>0;}
 /* 無未解決衝突時才匯出包含目前資料與衝突狀態的 JSON 備份。 */
-function exportJSON(){if(hasUnresolvedConflicts()){showToast("請先解決本次衝突再執行匯出");return;}downloadBlob(new Blob([JSON.stringify({app:"TickBrick",version:2,exportedAt:new Date().toISOString(),data:state},null,2)],{type:"application/json"}),"TickBrick_行程備份_"+todayString()+".json");}
+function exportJSON(){discardCategoryDrafts();if(hasUnresolvedConflicts()){showToast("請先解決本次衝突再執行匯出");return;}downloadBlob(new Blob([JSON.stringify({app:"TickBrick",version:2,exportedAt:new Date().toISOString(),data:state},null,2)],{type:"application/json"}),"TickBrick_行程備份_"+todayString()+".json");}
 /* 檢查原始備份中的所有正式與暫存行程，避免超上限資料覆蓋目前資料。 */
 function backupHasOverLimitDuration(raw){
  const rows=Array.isArray(raw)?[...raw]:[];
@@ -1085,15 +1268,19 @@ function backupHasOverLimitDuration(raw){
  return rows.some(row=>row&&!durationWithinLimit(row.duration));
 }
 /* 讀取 JSON 備份；先拒絕任一超過單一行程時長上限的資料，再要求使用者確認覆蓋。 */
-function importJSON(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result),raw=parsed.data||parsed;if(!Array.isArray(raw)&&(!raw||typeof raw!=="object"||!Array.isArray(raw.dates)))throw new Error("format");if(backupHasOverLimitDuration(raw)){showToast("備份含有超過 1440 分鐘的行程，未覆蓋現有資料");return;}if(backupHasMiddleEndBeforeStart(raw)){showToast("備份含有中間行程跨午夜，未覆蓋現有資料");return;}const imported=normalizeState(raw);askConfirm("匯入並取代現有資料","匯入備份會取代目前所有日期、行程、暫存項目與類別顏色。確定繼續嗎？","取代並匯入",()=>{state=imported;if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();showToast("備份匯入完成");});}catch(error){showToast("無法讀取此 JSON 行程備份");}};reader.readAsText(file,"UTF-8");}
+function importJSON(file){discardCategoryDrafts();const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result),raw=parsed.data||parsed;if(!Array.isArray(raw)&&(!raw||typeof raw!=="object"||!Array.isArray(raw.dates)))throw new Error("format");if(backupHasOverLimitDuration(raw)){showToast("備份含有超過 1440 分鐘的行程，未覆蓋現有資料");return;}if(backupHasMiddleEndBeforeStart(raw)){showToast("備份含有中間行程跨午夜，未覆蓋現有資料");return;}const imported=normalizeState(raw);askConfirm("匯入並取代現有資料","匯入備份會取代目前所有日期、行程、暫存項目與類別顏色。確定繼續嗎？","取代並匯入",()=>{state=imported;if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();showToast("備份匯入完成");});}catch(error){showToast("無法讀取此 JSON 行程備份");}};reader.readAsText(file,"UTF-8");}
 /* 取得今日的 YYYY-MM-DD 文字，供匯出檔名使用。 */
 function todayString(){return new Date().toISOString().slice(0,10);}
 /* 以指定檔名觸發瀏覽器下載 Blob。 */
 function downloadBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}
 
 /* 先選日期，再輸出每天獨立圖片或 PDF；多檔以 ZIP 下載。 */
+// #endregion
+// #region [匯出備份] 圖片、PDF 與 ZIP
+// 責任：日期選擇、LOGO、Canvas、PDF 分頁及 ZIP 打包。
 /* 開啟圖片或 PDF 匯出選擇器，並在有未解衝突時停止匯出流程。 */
 function openExportDialog(kind){
+ discardCategoryDrafts();
  if(hasUnresolvedConflicts()){showToast("請先解決本次衝突再執行匯出");return;}
  if(!state.dates.length){showToast("請先新增日期頁籤");return;}
  const content=document.createElement("div");content.className="export-options";const all=document.createElement("label");all.className="select-all";all.innerHTML='<input type="checkbox" checked> 選取全部日期';content.appendChild(all);
@@ -1173,6 +1360,9 @@ function zipFiles(files){
  const size=central.reduce((n,b)=>n+b.length,0),end=new Uint8Array(22),dv=new DataView(end.buffer);dv.setUint32(0,0x06054b50,true);dv.setUint16(8,files.length,true);dv.setUint16(10,files.length,true);dv.setUint32(12,size,true);dv.setUint32(16,offset,true);return new Blob([...parts,...central,end],{type:"application/zip"});
 }
 
+// #endregion
+// #region [燈箱提示] 共用對話框與二次確認
+// 責任：共用呈現、取消與動作順序；專用滾輪各自在自己的燈箱區段。
 /* 建立共用對話框，並依選用設定套用專用排列與初始鍵盤焦點。 */
 function openDialog(title,content,actions,options={}){
  const dialog=document.getElementById("appDialog");dialog.oncancel=null;dialog.onclick=null;dialog.className="app-dialog"+(options.dialogClass?" "+options.dialogClass:"");dialog.toggleAttribute("tabindex",Boolean(options.focusDialog));const titleTarget=document.getElementById("dialogTitle");titleTarget.replaceChildren();if(typeof title==="string")titleTarget.textContent=title;else titleTarget.append(title);const target=document.getElementById("dialogContent");target.replaceChildren();if(typeof content==="string")target.textContent=content;else target.appendChild(content);
@@ -1182,16 +1372,23 @@ function openDialog(title,content,actions,options={}){
 /* 開啟含確認與取消按鈕的共用二次確認燈箱。 */
 function askConfirm(title,message,confirmText,onConfirm){openDialog(title,message,[{text:confirmText,cls:"danger",run:onConfirm},{text:"取消",cls:""}]);}
 
+// #endregion
+// #region [啟動事件] 全域事件與首次繪製
+// 責任：連接固定控制項及全域事件，最後執行首次 render，保留執行順序。
 /* 連接畫面事件並首次繪製。 */
+document.getElementById("categorySettings").addEventListener("toggle",event=>{if(!event.currentTarget.open)renderCategories();});
+document.querySelector(".export-menu").addEventListener("toggle",event=>{if(event.currentTarget.open)discardCategoryDrafts();});
 document.getElementById("addRowButton").addEventListener("click",addRow);
 document.getElementById("calendarToggle").addEventListener("click",()=>openCalendar(true));
 document.getElementById("calendarPrev").addEventListener("click",()=>{activeCalendarMonth=new Date(activeCalendarMonth.getFullYear(),activeCalendarMonth.getMonth()-1,1);renderCalendar();});
 document.getElementById("calendarNext").addEventListener("click",()=>{activeCalendarMonth=new Date(activeCalendarMonth.getFullYear(),activeCalendarMonth.getMonth()+1,1);renderCalendar();});
 document.addEventListener("click",e=>{const pop=document.getElementById("calendarPopover"),menu=document.querySelector(".export-menu");if(!pop.contains(e.target)&&!document.getElementById("calendarToggle").contains(e.target))pop.hidden=true;if(menu.open&&!menu.contains(e.target))menu.open=false;});
+// [拖曳操作] 全域暫存目標：接收日期列拖入，與 bindRows 的列事件共同作用。
 const stagingSection=document.getElementById("stagingSection");
 stagingSection.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&draggedRow.area==="day"){e.preventDefault();stagingSection.classList.add("drop-target");}});
 stagingSection.addEventListener("dragleave",e=>{if(!stagingSection.contains(e.relatedTarget))stagingSection.classList.remove("drop-target");});
 stagingSection.addEventListener("drop",e=>{e.preventDefault();stagingSection.classList.remove("drop-target");if(!draggedRow||draggedRow.type!=="row"||draggedRow.area!=="day")return;const row=getRow("day",draggedRow.id);if(row)moveRowToStaging(row);});
+// [拖曳操作] 空白日期目標：接收暫存列拖回，交由待放置流程處理。
 const emptyDay=document.getElementById("emptyDay");
 emptyDay.addEventListener("dragover",e=>{if(draggedRow&&draggedRow.type==="row"&&draggedRow.area==="staging"){e.preventDefault();emptyDay.classList.add("drag-over");}});
 emptyDay.addEventListener("dragleave",()=>emptyDay.classList.remove("drag-over"));
@@ -1203,3 +1400,4 @@ document.getElementById("exportImageButton").addEventListener("click",()=>openEx
 document.getElementById("exportPdfButton").addEventListener("click",()=>openExportDialog("pdf"));
 window.addEventListener("beforeunload",()=>saveState());
 render();
+// #endregion

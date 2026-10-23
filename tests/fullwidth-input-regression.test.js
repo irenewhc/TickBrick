@@ -23,6 +23,6 @@ assert.match(source,/<input type="text" inputmode="numeric" pattern="\[0-9０-�
 assert.match(source,/aria-label="總時長（分鐘）" '\+\(row\.lock==="duration"\?"disabled":""\)\+' data-field="duration"/,"待放置行程的總時長不得因 pending 狀態停用");
 assert.match(source,/placeholder="HH:MM" '\+\(editDisabled\|\|row\.lock==="start"\?"disabled":""\)\+' data-field="start"/,"待放置行程的開始時間必須維持停用");
 assert.match(source,/placeholder="HH:MM" '\+\(editDisabled\|\|row\.lock==="end"\?"disabled":""\)\+' data-field="end"/,"待放置行程的結束時間必須維持停用");
-assert.match(source,/timeRetry=area==="day"&&!row\.pending&&\["start","end","duration"\]\.includes\(field\),submit=\(\)=>\{if\(timeRetry\)handleTimeEdit\(row\.id,field,input\.value,input\);else updateRow\(area,row\.id,field,input\.value,input\);}/,"待放置行程的總時長必須走一般更新流程，不得提前啟動時間連動");
+assert.match(source,/timeRetry=area==="day"&&!row\.pending&&\["start","end","duration"\]\.includes\(field\),submit=\(\)=>\{if\(field==="category"&&input\.value==="__custom_category__"\)return;if\(timeRetry\)handleTimeEdit\(row\.id,field,input\.value,input\);else updateRow\(area,row\.id,field,input\.value,input\);}/,"待放置行程的總時長必須走一般更新流程，不得提前啟動時間連動；自訂類別入口不得寫入資料");
 
 console.log("fullwidth input regression test passed");

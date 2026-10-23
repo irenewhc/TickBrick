@@ -29,6 +29,7 @@ vm.runInContext(`
  function getRow(){return currentRow;}
  function formatTime(value){return value;}
  function activeRows(){return currentRows;}
+ function discardCategoryDrafts(){}
  function formalIndexBefore(){return currentRow&&currentRow.single?-1:0;}
  function formalIndexAfter(){return currentRow&&currentRow.single?-1:0;}
  function fieldLabel(field){return({start:"開始時間",end:"結束時間",duration:"總時長"}[field]);}
