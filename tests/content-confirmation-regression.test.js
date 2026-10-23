@@ -43,6 +43,8 @@ vm.runInContext(`
  ${functionSource("durationWithinLimit")}
  ${functionSource("durationLimitConflict")}
  ${functionSource("syncDurationLimitConflicts")}
+ ${functionSource("isInvalidMiddleCrossDay")}
+ ${functionSource("isAllowedBoundaryFullDay")}
  ${functionSource("middleEndBeforeStartConflicts")}
  ${functionSource("middleEndBeforeStartConflict")}
  ${functionSource("syncMiddleEndBeforeStartConflicts")}

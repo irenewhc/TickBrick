@@ -202,8 +202,12 @@ function syncDurationLimitConflicts(target=state){
  (target.staging||[]).forEach(row=>{if(!durationWithinLimit(row.duration))limits.push(durationLimitConflict(row,"","staging"));});
  target.conflicts=ordinary.concat(limits);return target;
 }
-/* 列出中間正式行程的結束早於開始；待放置列不計入首尾跨午夜例外。 */
-function middleEndBeforeStartConflicts(rows,date){return rows.filter(row=>!row.pending).slice(1,-1).filter(row=>row.start&&row.end&&timeToMin(row.end)<timeToMin(row.start)).map(row=>({id:"end-before-start-"+row.id,date:date||"",area:"day",lockedRowId:row.id,lockedField:"end",lockedValue:row.end,requiredValue:row.start,operation:"時間連動",endBeforeStart:true}));}
+/* 中間正式行程不得跨午夜；結束早於開始，或同時刻卻長達 1440 分鐘皆代表跨日。首尾與唯一正式行程保留既有例外，0 分鐘同時刻仍合法。 */
+function isInvalidMiddleCrossDay(row){return !!(row?.start&&row?.end&&(timeToMin(row.end)<timeToMin(row.start)||(row.start===row.end&&Number(row.duration)===1440)));}
+/* 首筆、末筆或唯一正式行程的 1440 分鐘同時刻是允許的完整一天，不是起訖／時長不一致。 */
+function isAllowedBoundaryFullDay(row,formal,index){return !!(row?.start&&row.start===row.end&&Number(row.duration)===1440&&(index===0||index===formal.length-1));}
+/* 列出中間正式行程的跨午夜；待放置列不計入首尾跨午夜例外。 */
+function middleEndBeforeStartConflicts(rows,date){return rows.filter(row=>!row.pending).slice(1,-1).filter(isInvalidMiddleCrossDay).map(row=>({id:"end-before-start-"+row.id,date:date||"",area:"day",lockedRowId:row.id,lockedField:"end",lockedValue:row.end,requiredValue:row.start,operation:"時間連動",endBeforeStart:true}));}
 /* 取得第一筆中間跨午夜衝突，供時間試算快速中止不合法候選。 */
 function middleEndBeforeStartConflict(rows,date){return middleEndBeforeStartConflicts(rows,date)[0]||null;}
 /* 同步舊資料的中間跨午夜衝突，使其可標示、阻擋匯出並等待使用者修復。 */
@@ -215,7 +219,7 @@ function syncMiddleEndBeforeStartConflicts(target=state){
 /* 將正式時間鏈拆成可獨立解除的原子衝突：單列起訖／時長不一致，以及相鄰兩列未串接。 */
 function timelineAtomicConflicts(rows,date){
  const formal=rows.filter(row=>!row.pending),conflicts=[];
- formal.forEach(row=>{if(row.start&&row.end&&durationWithinLimit(row.duration)&&durationBetween(row.start,row.end)!==durationValue(row.duration))conflicts.push({id:"row-consistency-"+date+"-"+row.id,kind:"row-consistency",date,area:"day",rowId:row.id,lockedRowId:row.id,operation:"時間鏈檢核"});});
+ formal.forEach((row,index)=>{if(row.start&&row.end&&durationWithinLimit(row.duration)&&durationBetween(row.start,row.end)!==durationValue(row.duration)&&!isAllowedBoundaryFullDay(row,formal,index))conflicts.push({id:"row-consistency-"+date+"-"+row.id,kind:"row-consistency",date,area:"day",rowId:row.id,lockedRowId:row.id,operation:"時間鏈檢核"});});
  for(let index=1;index<formal.length;index++){const left=formal[index-1],right=formal[index];if(left.end&&right.start&&left.end!==right.start)conflicts.push({id:"adjacency-"+date+"-"+left.id+"-"+right.id,kind:"adjacency",date,area:"day",leftRowId:left.id,rightRowId:right.id,operation:"時間鏈檢核"});}
  return conflicts;
 }
@@ -249,7 +253,8 @@ function fieldLabel(field){return({start:"開始時間",end:"結束時間",durat
 /* 依保留直接輸入的實際不一致，列出仍須標紅的行程；來源欄位修好後只保留尚未解決的一側。 */
 function directConflictRowIds(conflict){
  const context=conflict.directContext;if(!context)return[];const rows=state.days[conflict.date]||[],sourceIndex=rows.findIndex(row=>row.id===conflict.directRowId);
- if(sourceIndex<0)return[];const ids=new Set(),source=rows[sourceIndex],formal=rows.filter(row=>!row.pending),formalIndex=formal.findIndex(row=>row.id===source.id),invalid=row=>!row.start||!row.end||timeAfter(row.start,Number(row.duration))!==row.end||(formalIndex>0&&formalIndex<formal.length-1&&row===source&&timeToMin(row.end)<timeToMin(row.start));
+ if(sourceIndex<0)return[];const ids=new Set(),source=rows[sourceIndex],formal=rows.filter(row=>!row.pending),formalIndex=formal.findIndex(row=>row.id===source.id),invalid=row=>!row.start||!row.end||timeAfter(row.start,Number(row.duration))!==row.end||(formalIndex>0&&formalIndex<formal.length-1&&row===source&&isInvalidMiddleCrossDay(row));
+ if(context.blankFirstInput)return[];
  const previousIndex=findFormalBefore(rows,sourceIndex),nextIndex=findFormalAfter(rows,sourceIndex),previous=rows[previousIndex],next=rows[nextIndex],addInvalid=row=>{if(row&&invalid(row))ids.add(row.id);};
  if(conflict.directField){addInvalid(source);if(["start","duration"].includes(conflict.directField)&&previous&&previous.end!==source.start)ids.add(previous.id);if(["end","duration"].includes(conflict.directField)&&next&&source.end!==next.start)ids.add(next.id);return[...ids];}
  const chainIds=context.chainRowIds||[conflict.directRowId,conflict.lockedRowId],indexes=chainIds.map(id=>rows.findIndex(row=>row.id===id)).filter(index=>index>=0);if(!indexes.length)return[];
@@ -352,11 +357,21 @@ function reorderConflictStillBlocks(conflict){
  try{return !!recalculateReorderedDayRow(row,rows.indexOf(row),"重新檢查排序衝突");}
  finally{state.days[conflict.date]=originalRows;state.activeDate=originalDate;}
 }
+/* 檢查原始整鏈空白的首次來源是否已由後續正常時間修改真正補齊及串接。 */
+function blankFirstInputConflictStillBlocks(conflict){
+ const rows=state.days[conflict.date]||[],sourceIndex=rows.findIndex(row=>row.id===conflict.directRowId),source=rows[sourceIndex];if(!source||!source.start||!source.end)return true;
+ if(timeAfter(source.start,durationValue(source.duration))!==source.end||isInvalidMiddleCrossDay(source))return true;
+ const previous=rows[findFormalBefore(rows,sourceIndex)],next=rows[findFormalAfter(rows,sourceIndex)];
+ return !!((previous?.end&&previous.end!==source.start)||(next?.start&&source.end!==next.start));
+}
 /* 檢查直接輸入衝突是否仍有實際參與列，作為黃底與保存提示的共同判定。 */
-function directConflictStillBlocks(conflict){return !!directConflictRowIds(conflict).length;}
+function directConflictStillBlocks(conflict){
+ if(conflict.directContext?.blankFirstInput)return blankFirstInputConflictStillBlocks(conflict);
+ return !!directConflictRowIds(conflict).length;
+}
 /* 判斷鎖定與已回復操作的衝突是否仍會阻擋目前資料；直接輸入以實際時間鏈判定。 */
 function conflictStillBlocks(conflict){
- if(conflict.kind==="row-consistency"){const row=(state.days[conflict.date]||[]).find(item=>item.id===conflict.rowId);return !!row&&row.start&&row.end&&durationWithinLimit(row.duration)&&durationBetween(row.start,row.end)!==durationValue(row.duration);}
+ if(conflict.kind==="row-consistency"){const rows=state.days[conflict.date]||[],formal=rows.filter(item=>!item.pending),index=formal.findIndex(item=>item.id===conflict.rowId),row=formal[index];return !!row&&row.start&&row.end&&durationWithinLimit(row.duration)&&durationBetween(row.start,row.end)!==durationValue(row.duration)&&!isAllowedBoundaryFullDay(row,formal,index);}
  if(conflict.kind==="adjacency"){const rows=state.days[conflict.date]||[],left=rows.find(item=>item.id===conflict.leftRowId),right=rows.find(item=>item.id===conflict.rightRowId);return isTimeBoundary(left,right);}
  if(conflict.durationLimit){const rows=conflict.area==="staging"?state.staging:(state.days[conflict.date]||[]),row=rows.find(item=>item.id===conflict.lockedRowId);return !!row&&!durationWithinLimit(row.duration);}
  if(conflict.endBeforeStart)return middleEndBeforeStartConflicts(state.days[conflict.date]||[],conflict.date).some(item=>item.lockedRowId===conflict.lockedRowId);
@@ -667,6 +682,16 @@ function previewTimeOption(row,index,field,value,option){
  try{const trialRow=activeRows().find(item=>item.id===row.id),conflict=applyTimeOption(trialRow,index,field,value,option,{rowId:row.id,field});return{option,conflict,trial};}
  finally{state=original;}
 }
+/* 在完整 state 副本只寫入雙側鎖定直接修正的目標欄位；確認本列、相鄰接點、鎖定值與其餘資料都不變才回傳副本。 */
+function directTimeEditSnapshot(row,index,field,value){
+ const before=structuredClone(state),trial=structuredClone(state),date=before.activeDate,beforeRows=before.days[date]||[],trialRows=trial.days[date]||[],trialRow=trialRows.find(item=>item.id===row.id);
+ if(!trialRow)return null;trialRow[field]=value;
+ const targetIndex=trialRows.findIndex(item=>item.id===row.id),previous=trialRows[findFormalBefore(trialRows,targetIndex)],next=trialRows[findFormalAfter(trialRows,targetIndex)],beforeMiddle=new Set(middleEndBeforeStartConflicts(beforeRows,date).map(conflict=>conflict.id)),addsMiddleCrossMidnight=middleEndBeforeStartConflicts(trialRows,date).some(conflict=>!beforeMiddle.has(conflict.id));
+ const targetValid=durationWithinLimit(trialRow.duration)&&trialRow.start&&trialRow.end&&timeAfter(trialRow.start,durationValue(trialRow.duration))===trialRow.end,connects=previous?.end===trialRow.start&&trialRow.end===next?.start,targetIsMiddleCrossMidnight=isInvalidMiddleCrossDay(trialRow);
+ const lockedValuesUnchanged=[...new Set([...Object.keys(before.days||{}),...Object.keys(trial.days||{})])].every(day=>{const oldRows=before.days?.[day]||[],newRows=trial.days?.[day]||[];return oldRows.length===newRows.length&&oldRows.every((oldRow,rowIndex)=>{const newRow=newRows[rowIndex],lock=oldRow.lock;return newRow&&oldRow.id===newRow.id&&(!['start','end','duration'].includes(lock)||oldRow[lock]===newRow[lock]);});})&&before.staging.length===trial.staging.length&&before.staging.every((oldRow,rowIndex)=>{const newRow=trial.staging[rowIndex],lock=oldRow.lock;return newRow&&oldRow.id===newRow.id&&(!['start','end','duration'].includes(lock)||oldRow[lock]===newRow[lock]);});
+ const expected=structuredClone(before),expectedRow=(expected.days[date]||[]).find(item=>item.id===row.id);if(!expectedRow)return null;expectedRow[field]=value;
+ return targetValid&&connects&&!targetIsMiddleCrossMidnight&&!addsMiddleCrossMidnight&&lockedValuesUnchanged&&JSON.stringify(expected)===JSON.stringify(trial)?trial:null;
+}
 /* 判斷開始／結束輸入是否正好位於兩側已鎖定的正式時間邊界，並收集其局部驗證範圍。 */
 function lockedBoundaryTimeEditScope(row,index,field,value){
  const rows=activeRows(),previousIndex=formalIndexBefore(index),nextIndex=formalIndexAfter(index),previous=rows[previousIndex],next=rows[nextIndex];
@@ -735,8 +760,10 @@ function timeOptionBlockReason(preview){
 }
 /* 以本列及最近正式前後列建立真實不一致衝突；未鎖定資料不會被假稱為鎖定欄位。 */
 function keepTimeEditConflict(backup,rowId,index,field,value,option,preview){
+ const blankFirstInput=!!(preview&&backup.filter(item=>!item.pending).every(item=>!item.start&&!item.end));
  state.days[state.activeDate]=backup;const row=activeRows().find(item=>item.id===rowId);if(!row)return;setDirectValue(row,field,value);
  const rows=activeRows(),chainRowIds=[formalIndexBefore(index)>=0&&rows[formalIndexBefore(index)].id,row.id,formalIndexAfter(index)>=0&&rows[formalIndexAfter(index)].id].filter(Boolean);
+ if(blankFirstInput){const conflict={id:makeId(),date:state.activeDate,lockedRowId:row.id,lockedField:field,lockedValue:value,requiredValue:"",operation:"保留衝突",directRowId:row.id,directField:field,directContext:{kind:"blank-first-input",blankFirstInput:true,field,chainRowIds:[row.id]}};recordConflict(conflict);render();openConflictModal(conflict,true);return;}
  const directCheck={date:state.activeDate,directRowId:row.id,directContext:{chainRowIds}};if(!directConflictStillBlocks(directCheck)){clearConflictsAfterSuccess();render();return;}
  const original=preview&&preview.conflict,conflict=original?{...original}:{id:makeId(),date:state.activeDate,lockedRowId:row.id,lockedField:"",lockedValue:"",requiredValue:"",operation:"保留衝突"};
  const storedConflict={...conflict,directRowId:row.id,directField:field,directContext:{kind:"kept-option",key:option&&option.key||"",field,chainRowIds}};recordConflict(storedConflict);render();openConflictModal(storedConflict,true);
@@ -801,16 +828,18 @@ const update=preservePosition=>{if(preservePosition!==0)renderWheel(first,0);if(
  const preserve=()=>keepTimeEditConflict(structuredClone(activeRows()),row.id,index,field,value,valid[selected].option,valid[selected]);
  openDialog(timeEditDialogTitle(row,field,value),content,[{text:valid.length===1?"我知道了":"套用變更",cls:"primary",beforeClose:()=>[0,1,2].forEach(position=>{const wheel=wheels[position];if(wheel?.parentNode)wheel._commit?.();}),run:()=>{state=valid[selected].trial;clearConflictsAfterSuccess();render();showToast("時間連動已更新");}},{text:"保留衝突",cls:"danger",run:preserve},{text:"復原",cls:"",run:()=>renderDay()}],{dialogClass:"time-option-dialog",actionsClass:"time-option-wheel-actions",onCancel:preserve,focusDialog:true});
 }
-/* 處理正式行程時間欄位輸入；鎖定前後完整串接且時長已吻合時只修正時長，否則決定首次連動或以副本預覽的選項燈箱。 */
+/* 處理正式行程時間欄位輸入；開始／結束直接修正先驗證完整副本，總時長、首次輸入與一般候選流程維持原規則。 */
 function handleTimeEdit(id,field,value,input){
  const row=getRow("day",id);if(!row)return;const lockedField=row.lock==="none"?"":row.lock;if(row.lock===field){showToast("此欄位已鎖定，請先解除鎖定");renderDay();return;}
+ const blankFirstInputConflict=typeof state==="undefined"?null:state.conflicts.find(conflict=>conflict.directContext?.blankFirstInput&&conflict.date===state.activeDate&&conflict.directRowId===id&&conflict.directField===field);
+ if((field==="start"||field==="end")&&normalizeNumericInput(value)===""&&blankFirstInputConflict){row[field]="";state.conflicts=state.conflicts.filter(conflict=>conflict!==blankFirstInputConflict);input?.classList.remove("time-input-invalid");clearConflictsAfterSuccess();render();return;}
  if(field==="duration"&&!durationWithinLimit(value)){input?.classList.add("duration-input-invalid");showToast("單一行程最長為 1440 分鐘");return;}
  const parsed=field==="duration"?durationValue(value,0):formatTime(value);if((field==="start"||field==="end")&&!parsed){input?.classList.add("time-input-invalid");showToast("請輸入有效時間");return;}if(field==="duration")input?.classList.remove("duration-input-invalid");else input?.classList.remove("time-input-invalid");const rows=activeRows(),index=rows.indexOf(row),backup=structuredClone(rows);
  if(field==="duration"&&(!row.start||!row.end)){row.duration=parsed;clearConflictsAfterSuccess();render();return;}
  const previousIndex=formalIndexBefore(index),nextIndex=formalIndexAfter(index),previous=rows[previousIndex],next=rows[nextIndex];
- if(field==="duration"&&!row.pending&&row.start&&row.end&&previous?.lock==="end"&&next?.lock==="start"&&previous.end===row.start&&row.end===next.start&&timeAfter(row.start,parsed)===row.end){row.duration=parsed;clearConflictsAfterSuccess();render();return;}
- if(field==="start"&&!row.pending&&row.end&&previous?.lock==="end"&&next?.lock==="start"&&parsed===previous.end&&row.end===next.start&&timeAfter(parsed,durationValue(row.duration))===row.end){row.start=parsed;clearConflictsAfterSuccess();render();showToast("時間連動已更新");return;}
- if(field==="end"&&!row.pending&&row.start&&previous?.lock==="end"&&next?.lock==="start"&&previous.end===row.start&&parsed===next.start&&timeAfter(row.start,durationValue(row.duration))===parsed){row.end=parsed;clearConflictsAfterSuccess();render();showToast("時間連動已更新");return;}
+ if(field==="duration"&&!row.pending&&row.start&&row.end&&previous?.lock==="end"&&next?.lock==="start"&&previous.end===row.start&&row.end===next.start&&timeAfter(row.start,parsed)===row.end&&!isInvalidMiddleCrossDay({...row,duration:parsed})){row.duration=parsed;clearConflictsAfterSuccess();render();return;}
+ if(field==="start"&&!row.pending&&row.end&&previous?.lock==="end"&&next?.lock==="start"&&parsed===previous.end&&row.end===next.start&&timeAfter(parsed,durationValue(row.duration))===row.end){const trial=directTimeEditSnapshot(row,index,field,parsed);if(trial){state=trial;clearConflictsAfterSuccess();render();showToast("時間連動已更新");return;}}
+ if(field==="end"&&!row.pending&&row.start&&previous?.lock==="end"&&next?.lock==="start"&&previous.end===row.start&&parsed===next.start&&timeAfter(row.start,durationValue(row.duration))===parsed){const trial=directTimeEditSnapshot(row,index,field,parsed);if(trial){state=trial;clearConflictsAfterSuccess();render();showToast("時間連動已更新");return;}}
  if(!row.start&&!row.end&&(field==="start"||field==="end")){const preview=previewCompanionTime(row,index,field,parsed,"首次輸入時間");if(preview.conflict)return openNoTimeOptionDialog(row,index,field,parsed,"首次輸入時間",preview);state=preview.trial;clearConflictsAfterSuccess();render();return;}
  if((field==="start"&&!row.end)||(field==="end"&&!row.start)){const preview=previewCompanionTime(row,index,field,parsed,"補齊時間");if(preview.conflict)return openNoTimeOptionDialog(row,index,field,parsed,"補齊時間",preview);state=preview.trial;clearConflictsAfterSuccess();render();return;}
  const options=timeOptions(row,index,field);if(!options.length){showToast("目前鎖定條件下無法調整此欄位");renderDay();return;}
@@ -872,8 +901,8 @@ function deleteRowWithAdjustment(area,rowId,adjustment,silent,originSide){
 }
 /* 說明保留直接值後的真實時間不一致，不把未鎖定資料誤稱為鎖定欄位。 */
 function directConflictDescription(conflict){
- const rows=state.days[conflict.date]||[],ids=conflict.directContext?.chainRowIds||[],items=ids.map(id=>rows.find(row=>row.id===id)).filter(Boolean),messages=[];
- items.forEach((row,index)=>{const label=dialogRowName(row),formal=rows.filter(item=>!item.pending),formalIndex=formal.findIndex(item=>item.id===row.id);if(formalIndex>0&&formalIndex<formal.length-1&&row.start&&row.end&&timeToMin(row.end)<timeToMin(row.start))messages.push("「"+label+"」結束時間不可早於開始時間");if(!row.start||!row.end)messages.push("「"+label+"」缺少"+(!row.start?"開始時間":"結束時間")+"，尚無法完成時間串接");else if(timeAfter(row.start,Number(row.duration))!==row.end)messages.push("「"+label+"」的開始時間 "+row.start+" 加總時長 "+formatDuration(row.duration)+" 不等於結束時間 "+row.end);if(index&&items[index-1].end!==row.start)messages.push("「"+dialogRowName(items[index-1],"前一項行程")+"」結束時間 "+items[index-1].end+" 不等於「"+label+"」開始時間 "+row.start);});
+ const rows=state.days[conflict.date]||[],ids=conflict.directContext?.chainRowIds||[],items=(conflict.directContext?.blankFirstInput?[rows.find(row=>row.id===conflict.directRowId)]:ids.map(id=>rows.find(row=>row.id===id))).filter(Boolean),messages=[];
+ items.forEach((row,index)=>{const label=dialogRowName(row),formal=rows.filter(item=>!item.pending),formalIndex=formal.findIndex(item=>item.id===row.id);if(formalIndex>0&&formalIndex<formal.length-1&&isInvalidMiddleCrossDay(row))messages.push("「"+label+"」中間行程不可跨午夜（結束時間不可早於開始時間，或同一時間的總時長為 1440 分鐘）");if(!row.start||!row.end)messages.push("「"+label+"」缺少"+(!row.start?"開始時間":"結束時間")+"，尚無法完成時間串接");else if(timeAfter(row.start,Number(row.duration))!==row.end)messages.push("「"+label+"」的開始時間 "+row.start+" 加總時長 "+formatDuration(row.duration)+" 不等於結束時間 "+row.end);if(index&&items[index-1].end!==row.start)messages.push("「"+dialogRowName(items[index-1],"前一項行程")+"」結束時間 "+items[index-1].end+" 不等於「"+label+"」開始時間 "+row.start);});
  return messages;
 }
 /* 顯示鎖定或真實不一致衝突的所需值與回復結果，關閉後仍保留黃／紅提示。 */
@@ -1056,7 +1085,7 @@ function backupHasOverLimitDuration(raw){
  return rows.some(row=>row&&!durationWithinLimit(row.duration));
 }
 /* 讀取 JSON 備份；先拒絕任一超過單一行程時長上限的資料，再要求使用者確認覆蓋。 */
-function importJSON(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result),raw=parsed.data||parsed;if(!Array.isArray(raw)&&(!raw||typeof raw!=="object"||!Array.isArray(raw.dates)))throw new Error("format");if(backupHasOverLimitDuration(raw)){showToast("備份含有超過 1440 分鐘的行程，未覆蓋現有資料");return;}if(backupHasMiddleEndBeforeStart(raw)){showToast("備份含有中間行程結束時間早於開始時間，未覆蓋現有資料");return;}const imported=normalizeState(raw);askConfirm("匯入並取代現有資料","匯入備份會取代目前所有日期、行程、暫存項目與類別顏色。確定繼續嗎？","取代並匯入",()=>{state=imported;if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();showToast("備份匯入完成");});}catch(error){showToast("無法讀取此 JSON 行程備份");}};reader.readAsText(file,"UTF-8");}
+function importJSON(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result),raw=parsed.data||parsed;if(!Array.isArray(raw)&&(!raw||typeof raw!=="object"||!Array.isArray(raw.dates)))throw new Error("format");if(backupHasOverLimitDuration(raw)){showToast("備份含有超過 1440 分鐘的行程，未覆蓋現有資料");return;}if(backupHasMiddleEndBeforeStart(raw)){showToast("備份含有中間行程跨午夜，未覆蓋現有資料");return;}const imported=normalizeState(raw);askConfirm("匯入並取代現有資料","匯入備份會取代目前所有日期、行程、暫存項目與類別顏色。確定繼續嗎？","取代並匯入",()=>{state=imported;if(state.activeDate)activeCalendarMonth=calendarMonthFor(state.activeDate);persist();render();showToast("備份匯入完成");});}catch(error){showToast("無法讀取此 JSON 行程備份");}};reader.readAsText(file,"UTF-8");}
 /* 取得今日的 YYYY-MM-DD 文字，供匯出檔名使用。 */
 function todayString(){return new Date().toISOString().slice(0,10);}
 /* 以指定檔名觸發瀏覽器下載 Blob。 */

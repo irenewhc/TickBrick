@@ -45,7 +45,7 @@ setRows([
 ]);
 api.refreshConflicts();
 assert.equal(api.state().conflicts.some(conflict=>conflict.endBeforeStart), true, "既有中間跨午夜資料必須保留衝突並阻擋匯出");
-assert.match(api.directConflictDescription({date:"2026-10-12",directContext:{chainRowIds:["A","B","C"]}}).join("\n"), /「中間」結束時間不可早於開始時間/, "保留衝突的第二個燈箱必須說明實際中間行程的時間先後錯誤");
+assert.match(api.directConflictDescription({date:"2026-10-12",directContext:{chainRowIds:["A","B","C"]}}).join("\n"), /「中間」中間行程不可跨午夜/, "保留衝突的第二個燈箱必須說明實際中間行程的跨日錯誤");
 rows = api.state().days["2026-10-12"]; option = api.timeOptions(rows[1],1,"duration").find(item=>item.key==="duration-down");
 assert.equal(api.previewTimeOption(rows[1],1,"duration",1430,option).conflict.endBeforeStart, true, "既有中間跨午夜資料不得以仍不合法的時長試算繼續存在");
 assert.equal(api.previewTimeOption(rows[1],1,"duration",20,option).conflict, null, "既有中間跨午夜資料修正為合法時間後必須可試算");
@@ -109,5 +109,26 @@ assert.equal(api.backupHasMiddleEndBeforeStart({dates:["2026-10-12"],days:{"2026
  {start:"07:25",end:"07:20",pending:false},
  {start:"07:20",end:"08:00",pending:false}
 ]}}), true, "匯入必須拒絕新增的中間跨午夜資料");
+
+setRows([
+ {id:"A",content:"首筆",start:"08:00",end:"08:00",duration:1440,lock:"none",pending:false},
+ {id:"B",content:"中間",start:"08:00",end:"08:00",duration:1440,lock:"none",pending:false},
+ {id:"C",content:"末筆",start:"08:00",end:"08:00",duration:1440,lock:"none",pending:false}
+]);
+api.refreshConflicts();
+assert.equal(api.state().conflicts.filter(conflict=>conflict.endBeforeStart).map(conflict=>conflict.lockedRowId).join(","), "B", "1440 分鐘且同一時間只有中間正式行程視為跨午夜");
+assert.equal(api.state().conflicts.filter(conflict=>conflict.kind==="row-consistency").some(conflict=>["A","C"].includes(conflict.rowId)), false, "首筆與末筆 1440 分鐘同時刻必須維持合法，不得被起訖一致性檢核誤判");
+assert.equal(api.backupHasMiddleEndBeforeStart({dates:["2026-10-12"],days:{"2026-10-12":[
+ {start:"08:00",end:"08:00",duration:1440,pending:false},
+ {start:"08:00",end:"08:00",duration:1440,pending:false},
+ {start:"08:00",end:"08:00",duration:0,pending:false}
+]}}), true, "匯入必須拒絕中間 1440 分鐘同時刻跨日資料");
+setRows([
+ {id:"A",content:"首筆",start:"08:00",end:"08:00",duration:0,lock:"none",pending:false},
+ {id:"B",content:"中間",start:"08:00",end:"08:00",duration:0,lock:"none",pending:false},
+ {id:"C",content:"末筆",start:"08:00",end:"08:00",duration:0,lock:"none",pending:false}
+]);
+api.refreshConflicts();
+assert.equal(api.state().conflicts.some(conflict=>conflict.endBeforeStart), false, "0 分鐘同時刻維持合法");
 
 console.log("cross-midnight core-rule regression test passed");
